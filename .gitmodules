@@ -1,0 +1,3 @@
+[submodule "target"]
+	path = target
+	url = git@github.com:KubeDefenders/kube-target.git
