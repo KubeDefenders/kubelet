@@ -1,0 +1,3 @@
+[submodule "target/app"]
+	path = target/app
+	url = https://github.com/microservices-demo/microservices-demo.git

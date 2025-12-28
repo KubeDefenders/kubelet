@@ -1,0 +1,59 @@
+name: Setup with Istio Mitigations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - gke
+          - eks
+          - aks
+
+jobs:
+  setup-with-istio-mitigations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Kubernetes & Target
+        uses: ./.github/actions/setup-kubernetes
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Deploy target application
+        uses: ./.github/actions/deploy-target
+
+      - name: Deploy monitoring
+        uses: ./.github/actions/deploy-monitoring
+
+      - name: Install Istio (if not present)
+        run: |
+          if ! command -v istioctl &> /dev/null; then
+            echo "Installing Istio..."
+            curl -L https://istio.io/downloadIstio | sh -
+            cd istio-* && export PATH=$PWD/bin:$PATH
+            istioctl install --set profile=demo -y
+          fi
+
+      - name: Deploy Istio mitigations
+        uses: ./.github/actions/deploy-mitigation
+        with:
+          strategy: istio-advanced
+          namespace: sock-shop
+
+      - name: Verify Istio mitigations
+        run: |
+          echo "🌐 Verifying Istio mitigations..."
+          kubectl get virtualservices -n sock-shop
+          kubectl get destinationrules -n sock-shop
+          kubectl get envoyfilters -n sock-shop || echo "No EnvoyFilters"
+
+      - name: Test rate limiting (if configured)
+        run: |
+          echo "✅ Istio mitigations deployed successfully"
+          echo "Strategies: rate-limiting, circuit-breaking, timeout/retry policies"

@@ -1,0 +1,121 @@
+name: Run Complete Experiment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - gke
+          - eks
+          - aks
+      attack-type:
+        description: 'Attack type to simulate'
+        required: true
+        type: choice
+        options:
+          - crossfire-app
+          - crossfire-network
+          - http-flood
+          - all
+      duration:
+        description: 'Experiment duration (seconds)'
+        required: false
+        default: '300'
+      with-mitigation:
+        description: 'Enable mitigations'
+        required: false
+        default: false
+        type: boolean
+      mitigation-type:
+        description: 'Mitigation strategy'
+        required: false
+        default: 'kubernetes-native'
+        type: choice
+        options:
+          - kubernetes-native
+          - istio-advanced
+          - nephio
+
+jobs:
+  run-experiment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-kubernetes
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Deploy target & monitoring
+        run: |
+          echo "🎯 Deploying target application..."
+          kubectl create namespace sock-shop --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f target/manifests/ -n sock-shop
+          
+          echo "📊 Deploying monitoring..."
+          kubectl apply -f detection/monitoring/ || true
+
+      - name: Deploy mitigations (if enabled)
+        if: ${{ inputs.with-mitigation }}
+        uses: ./.github/actions/deploy-mitigation
+        with:
+          strategy: ${{ inputs.mitigation-type }}
+          namespace: sock-shop
+
+      - name: Wait for services to be ready
+        run: |
+          kubectl wait --for=condition=ready pod --all -n sock-shop --timeout=300s || \
+            echo "⚠️  Some pods not ready, continuing anyway"
+
+      - name: Run attack simulation
+        uses: ./.github/actions/run-attack
+        with:
+          attack-type: ${{ inputs.attack-type }}
+          duration: ${{ inputs.duration }}
+          target-url: http://$(minikube ip 2>/dev/null || echo "localhost"):30001
+
+      - name: Collect experiment results
+        if: always()
+        uses: ./.github/actions/collect-results
+        with:
+          output-dir: results/experiment-${{ github.run_number }}
+
+      - name: Upload experiment results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: experiment-results-${{ github.run_number }}
+          path: experiment-results.tar.gz
+          retention-days: 90
+
+      - name: Upload detailed logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: experiment-logs-${{ github.run_number }}
+          path: |
+            **/*.log
+            detection/ml-detector/logs/*.jsonl
+            results/experiments/
+            results/attacks/
+          retention-days: 30
+
+      - name: Generate experiment summary
+        if: always()
+        run: |
+          echo "# Experiment Summary" > summary.md
+          echo "" >> summary.md
+          echo "**Environment:** ${{ inputs.environment }}" >> summary.md
+          echo "**Attack Type:** ${{ inputs.attack-type }}" >> summary.md
+          echo "**Duration:** ${{ inputs.duration }}s" >> summary.md
+          echo "**Mitigation:** ${{ inputs.with-mitigation }} (${{ inputs.mitigation-type }})" >> summary.md
+          echo "" >> summary.md
+          echo "Results collected in artifact: experiment-results-${{ github.run_number }}" >> summary.md
+          cat summary.md >> $GITHUB_STEP_SUMMARY

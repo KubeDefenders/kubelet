@@ -1,0 +1,99 @@
+name: Test Mitigation Strategies
+
+on:
+  workflow_dispatch:
+    inputs:
+      mitigation_type:
+        description: 'Mitigation type to test'
+        required: true
+        type: choice
+        options:
+          - kubernetes-native
+          - istio-advanced
+          - nephio
+          - all
+      attack_type:
+        description: 'Attack type to test against'
+        required: true
+        type: choice
+        options:
+          - volumetric
+          - application-layer
+          - crossfire
+          - all
+  push:
+    paths:
+      - 'mitigations/**'
+      - '.github/workflows/test-mitigations.yml'
+
+jobs:
+  test-mitigation:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        mitigation: 
+          - ${{ inputs.mitigation_type == 'all' && 'kubernetes-native' || inputs.mitigation_type }}
+          - ${{ inputs.mitigation_type == 'all' && 'istio-advanced' || '' }}
+          - ${{ inputs.mitigation_type == 'all' && 'nephio' || '' }}
+      fail-fast: false
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Setup Kubernetes
+        uses: azure/setup-kubectl@v3
+      
+      - name: Deploy target application
+        run: |
+          ./scripts/cluster/deploy-target.sh
+      
+      - name: Deploy mitigation
+        run: |
+          cd mitigations/${{ matrix.mitigation }}
+          ./deploy.sh --validate
+      
+      - name: Wait for mitigation to be ready
+        run: |
+          kubectl wait --for=condition=ready pod \
+            -l app=${{ matrix.mitigation }} \
+            -n mitigation \
+            --timeout=300s
+      
+      - name: Run attack simulation
+        run: |
+          cd attack-simulations
+          python test-crossfire-mitigations.py \
+            --mitigation ${{ matrix.mitigation }} \
+            --attack-type ${{ inputs.attack_type }} \
+            --duration 300 \
+            --output ../results/mitigation_test_${{ matrix.mitigation }}.json
+      
+      - name: Analyze mitigation effectiveness
+        run: |
+          cd mitigations
+          python scripts/analyze_effectiveness.py \
+            --test-results ../results/mitigation_test_${{ matrix.mitigation }}.json \
+            --output ../results/effectiveness_${{ matrix.mitigation }}.md
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: mitigation-test-${{ matrix.mitigation }}-${{ github.run_number }}
+          path: |
+            results/mitigation_test_*.json
+            results/effectiveness_*.md
+          retention-days: 60
+      
+      - name: Cleanup mitigation
+        if: always()
+        run: |
+          cd mitigations/${{ matrix.mitigation }}
+          ./cleanup.sh || true

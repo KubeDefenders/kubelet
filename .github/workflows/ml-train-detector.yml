@@ -1,0 +1,112 @@
+name: Train ML Detector
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: 'Dataset to use for training'
+        required: true
+        type: choice
+        options:
+          - cic-ddos-2019
+          - custom
+          - synthetic
+      model_type:
+        description: 'Model type to train'
+        required: true
+        type: choice
+        options:
+          - ensemble
+          - isolation-forest
+          - both
+      upload_artifacts:
+        description: 'Upload trained models as artifacts'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: false  # Don't pull LFS for training
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r detection/ml-detector/requirements.txt
+      
+      - name: Download dataset
+        if: inputs.dataset != 'custom'
+        run: |
+          cd detection/ml-detector
+          python scripts/download_dataset.py \
+            --dataset ${{ inputs.dataset }} \
+            --output data/
+      
+      - name: Train model
+        run: |
+          cd detection/ml-detector
+          python train_detector.py \
+            --data data/${{ inputs.dataset }}/ \
+            --output models/ \
+            --model-type ${{ inputs.model_type }} \
+            --log-file train.log
+      
+      - name: Evaluate model
+        run: |
+          cd detection/ml-detector
+          python scripts/evaluate_model.py \
+            --model models/ensemble_detector.pkl \
+            --test-data data/${{ inputs.dataset }}/test/ \
+            --output results/evaluation.json
+      
+      - name: Generate report
+        run: |
+          cd detection/ml-detector
+          python scripts/generate_report.py \
+            --evaluation results/evaluation.json \
+            --output results/training_report.md
+      
+      - name: Upload model artifacts
+        if: inputs.upload_artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: trained-models-${{ inputs.dataset }}-${{ github.run_number }}
+          path: |
+            detection/ml-detector/models/*.pkl
+            detection/ml-detector/models/*.json
+            detection/ml-detector/results/evaluation.json
+            detection/ml-detector/train.log
+          retention-days: 30
+      
+      - name: Upload training report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: training-report-${{ github.run_number }}
+          path: detection/ml-detector/results/training_report.md
+          retention-days: 90
+      
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('detection/ml-detector/results/training_report.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ML Training Results\n\n${report}`
+            });

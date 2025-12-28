@@ -1,0 +1,24 @@
+# Attack simulations specific ignores
+
+# Discovered endpoints
+discovered-endpoints.json
+
+# Test results
+crossfire-test-results*.json
+crossfire-detection-*.json
+*-test-results/
+crossfire-test-results-*/
+
+# Logs
+attack-logs/
+*.log
+
+# Network captures
+pcap/
+*.pcap
+*.pcapng
+
+# Temporary files
+tmp/
+temp/
+*.tmp

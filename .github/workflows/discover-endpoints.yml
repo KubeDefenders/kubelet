@@ -1,0 +1,84 @@
+name: Discover Attack Endpoints
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL to scan (e.g., http://target.local)'
+        required: true
+      depth:
+        description: 'Scan depth'
+        required: false
+        type: choice
+        options:
+          - shallow
+          - moderate
+          - deep
+        default: 'moderate'
+      save_results:
+        description: 'Upload discovered endpoints as artifact'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r attack-simulations/requirements.txt
+      
+      - name: Wait for target to be ready
+        run: |
+          echo "Waiting for target at ${{ inputs.target_url }}"
+          timeout 300 bash -c 'until curl -sf ${{ inputs.target_url }}/health; do sleep 5; done' || true
+      
+      - name: Discover endpoints
+        run: |
+          cd attack-simulations
+          python endpoint-discovery.py \
+            --target-url ${{ inputs.target_url }} \
+            --depth ${{ inputs.depth }} \
+            --output discovered-endpoints.json \
+            --verbose
+      
+      - name: Display discovered endpoints
+        run: |
+          echo "## Discovered Endpoints"
+          cd attack-simulations
+          python -c "
+          import json
+          with open('discovered-endpoints.json') as f:
+              data = json.load(f)
+          print(f'Total endpoints: {len(data[\"endpoints\"])}')
+          for ep in data['endpoints'][:10]:
+              print(f'  - {ep[\"method\"]:6} {ep[\"path\"]}')
+          if len(data['endpoints']) > 10:
+              print(f'  ... and {len(data[\"endpoints\"]) - 10} more')
+          "
+      
+      - name: Validate discovered endpoints
+        run: |
+          cd attack-simulations
+          python scripts/validate_endpoints.py \
+            --endpoints discovered-endpoints.json \
+            --target-url ${{ inputs.target_url }}
+      
+      - name: Upload discovered endpoints
+        if: inputs.save_results
+        uses: actions/upload-artifact@v3
+        with:
+          name: discovered-endpoints-${{ github.run_number }}
+          path: attack-simulations/discovered-endpoints.json
+          retention-days: 30

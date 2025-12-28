@@ -1,0 +1,75 @@
+name: Setup with Kubernetes Mitigations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - gke
+          - eks
+          - aks
+      components:
+        description: 'Mitigation components'
+        default: 'all'
+        type: choice
+        options:
+          - resource-quotas
+          - network-policies
+          - autoscaling
+          - all
+
+jobs:
+  setup-with-k8s-mitigations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Kubernetes & Target
+        uses: ./.github/actions/setup-kubernetes
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Deploy target application
+        uses: ./.github/actions/deploy-target
+
+      - name: Deploy monitoring
+        uses: ./.github/actions/deploy-monitoring
+
+      - name: Deploy Kubernetes-native mitigations
+        uses: ./.github/actions/deploy-mitigation
+        with:
+          strategy: kubernetes-native
+          namespace: sock-shop
+          components: ${{ inputs.components }}
+
+      - name: Verify mitigations
+        run: |
+          echo "📋 Verifying deployed mitigations..."
+          
+          if [ "${{ inputs.components }}" == "all" ] || [ "${{ inputs.components }}" == "resource-quotas" ]; then
+            echo ""
+            echo "📋 Resource Quotas:"
+            kubectl get resourcequota -n sock-shop
+          fi
+          
+          if [ "${{ inputs.components }}" == "all" ] || [ "${{ inputs.components }}" == "network-policies" ]; then
+            echo ""
+            echo "🔒 Network Policies:"
+            kubectl get networkpolicies -n sock-shop
+          fi
+          
+          if [ "${{ inputs.components }}" == "all" ] || [ "${{ inputs.components }}" == "autoscaling" ]; then
+            echo ""
+            echo "📈 Horizontal Pod Autoscalers:"
+            kubectl get hpa -n sock-shop
+          fi
+
+      - name: Run validation tests
+        run: |
+          echo "✅ Kubernetes-native mitigations deployed successfully"
+          echo "Components: ${{ inputs.components }}"

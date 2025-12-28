@@ -1,0 +1,216 @@
+# ========================================
+# Python
+# ========================================
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# ========================================
+# Machine Learning & AI
+# ========================================
+# Trained models (large binary files)
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+*.onnx
+*.pb
+*.tflite
+*.safetensors
+
+# Model artifacts
+*.npz
+*.npy
+*.hdf5
+
+# Keep production models (tracked with Git LFS when available)
+!detection/ml-detector/models/production/
+!detection/ml-detector/models/baselines/
+
+# Keep small test fixtures
+!**/fixtures/**/*.pkl
+!**/test_data/**/*.pkl
+
+# ========================================
+# Experiment Outputs & Results
+# ========================================
+# Experiment results
+results/experiments/
+results/continuous_experiments/
+results/aggregated/
+results/attacks/
+results/demo/
+results/reports/*.html
+results/reports/*.log
+
+# Keep templates and examples
+!results/templates/
+!results/examples/
+
+# Attack simulation outputs
+attack-simulations/discovered-endpoints.json
+attack-simulations/crossfire-detection-*.json
+attack-simulations/attack-logs/
+attack-simulations/pcap/
+attack-simulations/crossfire-test-results*.json
+attack-simulations/crossfire-test-results-*/
+attack-simulations/results/
+
+# Detection outputs
+detection/ml-detector/logs/
+detection/ml-detector/data/
+detection/ml-detector/results/
+ml-detector/logs/
+ml-detector/data/
+ml-detector/results/
+
+# Mitigation outputs
+mitigations/*/deployed-configs/
+mitigations/*/applied-rules/
+mitigations/*/validation-reports/
+mitigations/*/*-status.json
+
+# ========================================
+# Logs & Runtime Files
+# ========================================
+# Logs
+*.log
+!.gitkeep
+logs/
+*.jsonl
+
+# Timestamped outputs
+*-202*.json
+*-202*.log
+*-202*/
+
+# Process files
+*.pid
+*.lock
+*.seed
+
+# ========================================
+# Network Captures
+# ========================================
+# Packet captures (very large)
+*.pcap
+*.pcapng
+*.cap
+pcap/
+captures/
+
+# ========================================
+# Reports & Visualizations
+# ========================================
+# Generated reports
+*.html
+!docs/**/*.html
+!target/**/*.html
+locust-report.html
+
+# Plots and figures
+*.png
+!docs/**/*.png
+!**/*.drawio.png
+!**/architecture/**/*.png
+*.jpg
+*.jpeg
+*.pdf
+!docs/**/*.pdf
+plots/
+figures/
+
+# ========================================
+# Data Files
+# ========================================
+# Data directories (large datasets)
+data/
+datasets/
+!**/data/.gitkeep
+!**/data/README.md
+
+# CSV data files (large training data)
+*.csv
+!**/sample*.csv
+!**/example*.csv
+!**/schema*.csv
+
+# ========================================
+# Documentation (user wants to review)
+# ========================================
+# Exclude docs/ for now - will be reviewed and committed separately
+docs/
+
+# ========================================
+# IDE & Editor Files
+# ========================================
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ========================================
+# Kubernetes & Cloud
+# ========================================
+.kube/
+kubeconfig
+
+# Kubernetes secrets
+secrets/
+*.secret
+*.key
+*.pem
+
+# Terraform state
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# ========================================
+# Environment Files
+# ========================================
+.env
+*.env.local
+
+# ========================================
+# Build & Distribution
+# ========================================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ========================================
+# Testing
+# ========================================
+.pytest_cache/
+.coverage
+*.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# ========================================
+# Temporary Files
+# ========================================
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup

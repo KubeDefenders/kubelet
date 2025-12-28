@@ -1,0 +1,21 @@
+# Mitigation implementations specific ignores
+
+# Deployment artifacts
+*/deployed-configs/
+*/applied-rules/
+*/validation-reports/
+
+# Status files
+*/*-status.json
+*/status.json
+
+# Logs
+*.log
+logs/
+
+# Temporary configs
+*/tmp/
+*/temp/
+
+# Testing outputs
+*/test-results/

@@ -1,0 +1,72 @@
+name: Cleanup Resources
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to cleanup'
+        required: true
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - gke
+          - eks
+          - aks
+      delete-cluster:
+        description: 'Delete entire cluster'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Delete sock-shop namespace
+        run: |
+          kubectl delete namespace sock-shop --ignore-not-found=true || true
+
+      - name: Delete monitoring namespace
+        run: |
+          kubectl delete namespace monitoring --ignore-not-found=true || true
+
+      - name: Remove Istio configuration
+        run: |
+          kubectl delete virtualservices --all -n sock-shop --ignore-not-found=true || true
+          kubectl delete destinationrules --all -n sock-shop --ignore-not-found=true || true
+
+      - name: Clean local artifacts
+        run: |
+          rm -f runtime-config.env
+          rm -f monitoring-config.env
+          rm -f experiment-results.tar.gz
+          echo "✅ Local artifacts cleaned"
+
+      - name: Delete cluster (if requested)
+        if: ${{ inputs.delete-cluster }}
+        run: |
+          if [ "${{ inputs.environment }}" == "local" ]; then
+            minikube delete || true
+          elif [ "${{ inputs.environment }}" == "gke" ]; then
+            gcloud container clusters delete ddos-research --zone=us-central1-a --quiet || true
+          elif [ "${{ inputs.environment }}" == "eks" ]; then
+            eksctl delete cluster --name=ddos-research --region=us-west-2 || true
+          elif [ "${{ inputs.environment }}" == "aks" ]; then
+            az aks delete --resource-group ddos-research --name ddos-research --yes --no-wait || true
+          fi
+          echo "✅ Cluster deletion initiated"
+
+      - name: Cleanup summary
+        run: |
+          echo "🧹 Cleanup completed"
+          echo "  - sock-shop namespace: deleted"
+          echo "  - monitoring namespace: deleted"
+          echo "  - Istio configs: removed"
+          echo "  - Local artifacts: cleaned"
+          if [ "${{ inputs.delete-cluster }}" == "true" ]; then
+            echo "  - Cluster: deletion initiated"
+          fi

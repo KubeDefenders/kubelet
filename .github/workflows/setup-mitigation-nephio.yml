@@ -1,0 +1,53 @@
+name: Setup with Nephio Mitigations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - gke
+          - eks
+          - aks
+
+jobs:
+  setup-with-nephio-mitigations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Kubernetes & Target
+        uses: ./.github/actions/setup-kubernetes
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Deploy target application
+        uses: ./.github/actions/deploy-target
+
+      - name: Deploy monitoring
+        uses: ./.github/actions/deploy-monitoring
+
+      - name: Check Nephio prerequisites
+        run: |
+          echo "🔍 Checking Nephio installation..."
+          # Add Nephio installation check here
+          echo "⚠️  Note: Nephio requires additional setup"
+          echo "See: https://nephio.org/docs/guides/install-guides/"
+
+      - name: Deploy Nephio packages
+        uses: ./.github/actions/deploy-mitigation
+        with:
+          strategy: nephio
+          namespace: sock-shop
+
+      - name: Verify Nephio mitigations
+        run: |
+          echo "📦 Verifying Nephio packages..."
+          kubectl get packages -n sock-shop || echo "Package CRD not found - install Nephio first"
+          
+          echo "✅ Nephio mitigation configuration deployed"
+          echo "Note: Requires Nephio operator to be installed"

@@ -1,0 +1,79 @@
+name: Test ML Detector
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_path:
+        description: 'Path to model file'
+        required: true
+        default: 'detection/ml-detector/models/ensemble_detector.pkl'
+  push:
+    paths:
+      - 'detection/ml-detector/**'
+      - '.github/workflows/ml-test-detector.yml'
+  pull_request:
+    paths:
+      - 'detection/ml-detector/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true  # Pull LFS models for testing
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r detection/ml-detector/requirements.txt
+          pip install pytest pytest-cov
+      
+      - name: Run unit tests
+        run: |
+          cd detection/ml-detector
+          pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=html
+      
+      - name: Run integration tests
+        run: |
+          cd detection/ml-detector
+          pytest tests/integration/ -v
+      
+      - name: Test model loading
+        run: |
+          cd detection/ml-detector
+          python -c "
+          from src.detector import load_model
+          model = load_model('${{ inputs.model_path }}')
+          print(f'✅ Model loaded successfully: {type(model).__name__}')
+          "
+      
+      - name: Run adaptive tests
+        run: |
+          cd detection/ml-detector
+          python tests/test_adaptive_detection.py \
+            --model ${{ inputs.model_path }} \
+            --output logs/adaptive_testing.jsonl
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: detection/ml-detector/coverage.xml
+          flags: ml-detector
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: ml-test-results-${{ github.run_number }}
+          path: |
+            detection/ml-detector/htmlcov/
+            detection/ml-detector/logs/adaptive_testing.jsonl
+          retention-days: 30

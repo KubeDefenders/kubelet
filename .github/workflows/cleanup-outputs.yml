@@ -1,0 +1,97 @@
+name: Cleanup Output Files
+
+on:
+  workflow_dispatch:
+    inputs:
+      age_days:
+        description: 'Delete files older than (days)'
+        required: false
+        default: '30'
+        type: number
+      dry_run:
+        description: 'Dry run (show what would be deleted)'
+        required: false
+        type: boolean
+        default: true
+  schedule:
+    # Weekly cleanup on Sunday at 2 AM
+    - cron: '0 2 * * 0'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Find old experiment results
+        id: find-experiments
+        run: |
+          echo "## Old Experiment Results" >> $GITHUB_STEP_SUMMARY
+          find results/experiments/ -type d -mtime +${{ inputs.age_days }} 2>/dev/null | tee old_experiments.txt || echo "No experiments directory"
+          echo "count=$(wc -l < old_experiments.txt 2>/dev/null || echo 0)" >> $GITHUB_OUTPUT
+      
+      - name: Find old attack results
+        id: find-attacks
+        run: |
+          echo "## Old Attack Results" >> $GITHUB_STEP_SUMMARY
+          find results/attacks/ -type f -mtime +${{ inputs.age_days }} 2>/dev/null | tee old_attacks.txt || echo "No attacks directory"
+          echo "count=$(wc -l < old_attacks.txt 2>/dev/null || echo 0)" >> $GITHUB_OUTPUT
+      
+      - name: Find old logs
+        id: find-logs
+        run: |
+          echo "## Old Log Files" >> $GITHUB_STEP_SUMMARY
+          find . -name "*.log" -mtime +${{ inputs.age_days }} 2>/dev/null | tee old_logs.txt || echo "No old logs"
+          echo "count=$(wc -l < old_logs.txt 2>/dev/null || echo 0)" >> $GITHUB_OUTPUT
+      
+      - name: Find old monitoring logs
+        id: find-monitoring
+        run: |
+          echo "## Old Monitoring Logs" >> $GITHUB_STEP_SUMMARY
+          find detection/ml-detector/logs/ -name "*.jsonl" -mtime +${{ inputs.age_days }} 2>/dev/null | tee old_monitoring.txt || echo "No monitoring logs"
+          echo "count=$(wc -l < old_monitoring.txt 2>/dev/null || echo 0)" >> $GITHUB_OUTPUT
+      
+      - name: Calculate space to be freed
+        run: |
+          echo "## Space Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "Experiments: $(du -sh results/experiments/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+          echo "Attacks: $(du -sh results/attacks/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+          echo "Logs: $(find . -name '*.log' -exec du -ch {} + 2>/dev/null | tail -1 | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Remove old files (dry run)
+        if: inputs.dry_run
+        run: |
+          echo "🔍 DRY RUN - No files will be deleted"
+          echo "Would delete:"
+          echo "- ${{ steps.find-experiments.outputs.count }} experiment directories"
+          echo "- ${{ steps.find-attacks.outputs.count }} attack result files"
+          echo "- ${{ steps.find-logs.outputs.count }} log files"
+          echo "- ${{ steps.find-monitoring.outputs.count }} monitoring logs"
+      
+      - name: Remove old files (actual)
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "🗑️  Cleaning up old files..."
+          
+          # Remove old experiments
+          find results/experiments/ -type d -mtime +${{ inputs.age_days }} -exec rm -rf {} + 2>/dev/null || true
+          
+          # Remove old attack results
+          find results/attacks/ -type f -mtime +${{ inputs.age_days }} -delete 2>/dev/null || true
+          
+          # Remove old logs (keep last 7 days regardless)
+          find . -name "*.log" -mtime +7 -delete 2>/dev/null || true
+          
+          # Remove old monitoring logs (keep last 14 days)
+          find detection/ml-detector/logs/ -name "*.jsonl" -mtime +14 -delete 2>/dev/null || true
+          
+          echo "✅ Cleanup complete"
+      
+      - name: Report cleanup summary
+        run: |
+          echo "## Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "After cleanup:" >> $GITHUB_STEP_SUMMARY
+          echo "- Experiments: $(du -sh results/experiments/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+          echo "- Attacks: $(du -sh results/attacks/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY

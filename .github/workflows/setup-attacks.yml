@@ -1,0 +1,56 @@
+name: Setup Attacks Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: 'Python version'
+        required: false
+        default: '3.10'
+        type: choice
+        options:
+          - '3.10'
+          - '3.11'
+          - '3.12'
+
+jobs:
+  setup-attacks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install attack dependencies
+        run: |
+          cd attacks
+          pip install -r requirements.txt
+
+      - name: Validate attack scripts
+        run: |
+          cd attacks
+          python -m py_compile crossfire-app-level.py
+          python -m py_compile crossfire-network-level.py
+          python -m py_compile attack.py
+          echo "✅ All attack scripts validated successfully"
+
+      - name: Test endpoint discovery (if applicable)
+        run: |
+          cd attacks
+          if [ -f "endpoint-discovery.py" ]; then
+            echo "Testing endpoint discovery..."
+            python endpoint-discovery.py --help
+          fi
+
+      - name: Display attack capabilities
+        run: |
+          echo "Available attack types:"
+          echo "  - crossfire-app-level: Application-layer Crossfire attack"
+          echo "  - crossfire-network-level: Network-layer Crossfire attack"
+          echo "  - http-flood: HTTP flood attack"
+          echo ""
+          echo "Usage: Use 'run-attack' action or run directly with --target-url"

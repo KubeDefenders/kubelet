@@ -1,0 +1,80 @@
+name: Setup Target with Monitoring
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - gke
+          - eks
+          - aks
+      enable-ml-detection:
+        description: 'Enable ML detection'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  setup-with-monitoring:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Kubernetes cluster
+        uses: ./.github/actions/setup-kubernetes
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Deploy target application
+        uses: ./.github/actions/deploy-target
+
+      - name: Deploy monitoring stack
+        uses: ./.github/actions/deploy-monitoring
+        with:
+          enable-ml: ${{ inputs.enable-ml-detection }}
+
+      - name: Verify monitoring stack
+        run: |
+          echo "📊 Checking monitoring components..."
+          kubectl get pods -n monitoring
+          kubectl get servicemonitors -n sock-shop || echo "No servicemonitors yet"
+          
+          CLUSTER_IP=$(minikube ip 2>/dev/null || echo "localhost")
+          echo ""
+          echo "📊 Monitoring Endpoints:"
+          echo "  Prometheus: http://${CLUSTER_IP}:30090"
+          echo "  Grafana: http://${CLUSTER_IP}:30091"
+          
+          if [ "${{ inputs.enable-ml-detection }}" == "true" ]; then
+            echo ""
+            echo "🤖 ML Detection:"
+            echo "  Status: Enabled (dependencies installed)"
+            echo "  Run: cd detection/ml-detector && python cli_monitor.py"
+          fi
+
+      - name: Test Prometheus connectivity
+        run: |
+          CLUSTER_IP=$(minikube ip 2>/dev/null || echo "localhost")
+          curl -s "http://${CLUSTER_IP}:30090/api/v1/query?query=up" | jq . || \
+            echo "⚠️  Prometheus not yet accessible (may need port-forward)"
+
+      - name: Export monitoring configuration
+        run: |
+          CLUSTER_IP=$(minikube ip 2>/dev/null || echo "localhost")
+          cat > monitoring-config.env <<EOF
+          PROMETHEUS_URL=http://${CLUSTER_IP}:30090
+          GRAFANA_URL=http://${CLUSTER_IP}:30091
+          ML_DETECTION_ENABLED=${{ inputs.enable-ml-detection }}
+          EOF
+
+      - name: Upload monitoring configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitoring-config
+          path: monitoring-config.env

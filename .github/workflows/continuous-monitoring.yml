@@ -1,0 +1,105 @@
+name: Continuous Attack Monitoring
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Monitoring duration (minutes)'
+        required: true
+        default: '60'
+        type: number
+      prometheus_url:
+        description: 'Prometheus URL'
+        required: false
+        default: 'http://prometheus.monitoring.svc:9090'
+      alert_threshold:
+        description: 'Detection confidence threshold (0.0-1.0)'
+        required: false
+        default: '0.8'
+        type: number
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true  # Pull production models
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r detection/ml-detector/requirements.txt
+      
+      - name: Setup Kubernetes context
+        uses: azure/setup-kubectl@v3
+      
+      - name: Port-forward Prometheus
+        run: |
+          kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
+          sleep 10
+        continue-on-error: true
+      
+      - name: Run continuous monitoring
+        timeout-minutes: ${{ inputs.duration }}
+        run: |
+          cd detection/ml-detector
+          python continuous_monitor.py \
+            --model models/production/ensemble_detector.pkl \
+            --prometheus-url ${{ inputs.prometheus_url }} \
+            --interval 30 \
+            --threshold ${{ inputs.alert_threshold }} \
+            --output logs/monitoring_${{ github.run_number }}.jsonl
+        continue-on-error: true
+      
+      - name: Analyze monitoring results
+        if: always()
+        run: |
+          cd detection/ml-detector
+          python scripts/analyze_monitoring.py \
+            --log logs/monitoring_${{ github.run_number }}.jsonl \
+            --output results/monitoring_analysis.json
+      
+      - name: Generate alerts summary
+        if: always()
+        run: |
+          cd detection/ml-detector
+          python scripts/generate_alerts.py \
+            --analysis results/monitoring_analysis.json \
+            --output results/alerts_summary.md
+      
+      - name: Upload monitoring logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: monitoring-logs-${{ github.run_number }}
+          path: |
+            detection/ml-detector/logs/monitoring_*.jsonl
+            detection/ml-detector/results/monitoring_analysis.json
+            detection/ml-detector/results/alerts_summary.md
+          retention-days: 90
+      
+      - name: Create issue for critical alerts
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const alerts = fs.readFileSync('detection/ml-detector/results/alerts_summary.md', 'utf8');
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Critical DDoS Alerts Detected',
+              body: `## Monitoring Run #${{ github.run_number }}\n\n${alerts}`,
+              labels: ['security', 'ddos', 'critical']
+            });

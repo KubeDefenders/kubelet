@@ -1,0 +1,66 @@
+name: Setup Target Application
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - gke
+          - eks
+          - aks
+
+jobs:
+  setup-target:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Kubernetes cluster
+        uses: ./.github/actions/setup-kubernetes
+        with:
+          environment: ${{ inputs.environment }}
+          cluster-name: ddos-research
+
+      - name: Deploy Sock Shop application
+        uses: ./.github/actions/deploy-target
+        with:
+          namespace: sock-shop
+          manifests-path: target/manifests
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n sock-shop
+          kubectl get svc -n sock-shop
+          
+          if [ "${{ inputs.environment }}" == "local" ]; then
+            CLUSTER_IP=$(minikube ip)
+          else
+            CLUSTER_IP=$(kubectl get svc -n sock-shop front-end \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || echo "pending")
+          fi
+          
+          echo "TARGET_URL=http://${CLUSTER_IP}:30001" >> $GITHUB_OUTPUT
+          echo "✅ Target application deployed: http://${CLUSTER_IP}:30001"
+
+      - name: Export runtime configuration
+        id: config
+        run: |
+          CLUSTER_IP=$(minikube ip 2>/dev/null || echo "localhost")
+          cat > runtime-config.env <<EOF
+          CLUSTER_IP=${CLUSTER_IP}
+          TARGET_URL=http://${CLUSTER_IP}:30001
+          PROMETHEUS_URL=http://${CLUSTER_IP}:30090
+          TARGET_NAMESPACE=sock-shop
+          EOF
+
+      - name: Upload runtime configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-config
+          path: runtime-config.env

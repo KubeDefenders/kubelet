@@ -1,0 +1,69 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data directory (large dataset files)
+data/
+!data/.gitkeep
+!data/README.md
+!data/sample/
+
+# Model files (can be large)
+models/*.pkl
+models/*.joblib
+models/*.h5
+models/*.pt
+!models/.gitkeep
+
+# Keep production models directory structure
+!models/production/
+!models/baselines/
+!models/fixtures/
+
+# Production models tracked with Git LFS (when available)
+# models/production/*.pkl filter=lfs
+# models/production/*.h5 filter=lfs
+
+# Log files
+logs/
+*.log
+*.jsonl
+
+# Training artifacts
+*.npz
+*.npy
+checkpoints/
+runs/
+experiments/
+
+# Temporary files
+*.tmp
+.tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.env.local
+
+# Results and outputs
+results/
+outputs/
+plots/
+*.png
+*.jpg
+*.pdf
+!docs/**/*.png
+
+# Cache
+.cache/
+!docs/**/*.jpg
