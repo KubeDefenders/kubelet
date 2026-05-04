@@ -1,0 +1,103 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crossfire-detector
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app: crossfire-detector
+    app.kubernetes.io/component: detector
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+spec:
+  replicas: 1  # Single replica: detection is stateful (uses in-memory confirmation counters)
+  selector:
+    matchLabels:
+      app: crossfire-detector
+  template:
+    metadata:
+      labels:
+        app: crossfire-detector
+        app.kubernetes.io/component: detector
+        app.kubernetes.io/part-of: crossfire-nephio-refactor
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: crossfire-detector
+      # Run on control plane or dedicated monitoring node if available
+      # Remove nodeSelector if no dedicated node is configured
+      # nodeSelector:
+      #   node-role.kubernetes.io/monitoring: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: detector
+        # Build from detection/src/Dockerfile
+        # docker build -t crossfire-detector:latest detection/src/
+        image: crossfire-detector:latest  # kpt-set: ${detector-image}
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-u", "detector.py"]
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: crossfire-detector-config
+        env:
+        - name: KUBERNETES_API_URL
+          value: "https://kubernetes.default.svc"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+# Service for Prometheus scraping
+apiVersion: v1
+kind: Service
+metadata:
+  name: crossfire-detector
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app: crossfire-detector
+    app.kubernetes.io/component: detector
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+spec:
+  selector:
+    app: crossfire-detector
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: metrics
+    protocol: TCP

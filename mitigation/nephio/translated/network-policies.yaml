@@ -1,0 +1,270 @@
+---
+# Nephio-Enhanced NetworkPolicies
+# Translated from Nephio NetworkPolicy intents
+# Key difference: Anti-crossfire isolation, service classification, Nephio labels
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-default-deny-ingress
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/intent: "NetworkPolicy"
+    nephio.org/policy-type: "baseline-security"
+  annotations:
+    nephio.org/description: "Default deny all ingress - Nephio baseline security"
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-default-deny-egress
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/intent: "NetworkPolicy"
+    nephio.org/policy-type: "baseline-security"
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-allow-dns
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/intent: "NetworkPolicy"
+    nephio.org/policy-type: "essential-services"
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-frontend-ingress
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/intent: "NetworkPolicy"
+    nephio.org/service-class: "critical"
+  annotations:
+    nephio.org/description: "Allow ingress to front-end (critical service)"
+spec:
+  podSelector:
+    matchLabels:
+      name: front-end
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8079
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-frontend-egress
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: "critical"
+spec:
+  podSelector:
+    matchLabels:
+      name: front-end
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: catalogue
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector:
+        matchLabels:
+          name: user
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector:
+        matchLabels:
+          name: carts
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector:
+        matchLabels:
+          name: orders
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-catalogue-isolation
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/intent: "anti-crossfire"
+    nephio.org/service-class: "decoy"
+  annotations:
+    nephio.org/description: "Isolate decoy service to prevent crossfire amplification"
+    nephio.org/protection-mechanism: "traffic-isolation"
+spec:
+  podSelector:
+    matchLabels:
+      name: catalogue
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: front-end
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: catalogue-db
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-carts-isolation
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/intent: "anti-crossfire"
+    nephio.org/service-class: "decoy"
+spec:
+  podSelector:
+    matchLabels:
+      name: carts
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: front-end
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: carts-db
+    ports:
+    - protocol: TCP
+      port: 27017
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-orders-protection
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: "critical"
+  annotations:
+    nephio.org/description: "Strict ingress control for critical service"
+spec:
+  podSelector:
+    matchLabels:
+      name: orders
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: front-end
+    ports:
+    - protocol: TCP
+      port: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nephio-payment-protection
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: "critical"
+spec:
+  podSelector:
+    matchLabels:
+      name: payment
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: orders
+    ports:
+    - protocol: TCP
+      port: 80

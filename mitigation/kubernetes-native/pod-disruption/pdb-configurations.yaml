@@ -1,0 +1,139 @@
+---
+# PDB for front-end (user-facing)
+# Ensure at least 1 pod always available during disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: front-end-pdb
+  namespace: sock-shop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: front-end
+---
+# PDB for payment (critical service)
+# Maintain 75% availability during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-pdb
+  namespace: sock-shop
+spec:
+  minAvailable: 75%
+  selector:
+    matchLabels:
+      app: payment
+      critical-service: "true"
+---
+# PDB for orders (critical service)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: orders-pdb
+  namespace: sock-shop
+spec:
+  minAvailable: 75%
+  selector:
+    matchLabels:
+      app: orders
+      critical-service: "true"
+---
+# PDB for shipping (critical service)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: shipping-pdb
+  namespace: sock-shop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: shipping
+      critical-service: "true"
+---
+# PDB for catalogue (decoy - more lenient)
+# Can tolerate more disruption since it's a decoy
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: catalogue-pdb
+  namespace: sock-shop
+spec:
+  maxUnavailable: 50%  # Can lose up to 50% during disruption
+  selector:
+    matchLabels:
+      app: catalogue
+      decoy-service: "true"
+---
+# PDB for cart (decoy - more lenient)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: carts-pdb
+  namespace: sock-shop
+spec:
+  maxUnavailable: 50%
+  selector:
+    matchLabels:
+      app: carts
+      decoy-service: "true"
+---
+# PDB for user (decoy - more lenient)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: user-pdb
+  namespace: sock-shop
+spec:
+  maxUnavailable: 50%
+  selector:
+    matchLabels:
+      app: user
+      decoy-service: "true"
+---
+# PDB for databases (critical infrastructure)
+# Never allow all database pods to be disrupted
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: catalogue-db-pdb
+  namespace: sock-shop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: catalogue-db
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: carts-db-pdb
+  namespace: sock-shop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: carts-db
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: orders-db-pdb
+  namespace: sock-shop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: orders-db
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: user-db-pdb
+  namespace: sock-shop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: user-db

@@ -1,0 +1,129 @@
+---
+# Allow ingress traffic only from Istio gateway
+# Prevents direct pod-to-pod attacks bypassing service mesh
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-istio-gateway
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      app: front-end
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+      podSelector:
+        matchLabels:
+          app: istio-ingressgateway
+    ports:
+    - protocol: TCP
+      port: 8079
+---
+# Allow front-end to call internal services
+# But rate-limit at application layer (Istio handles this)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-to-services
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      app: front-end
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: catalogue
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector:
+        matchLabels:
+          app: user
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cart
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector:
+        matchLabels:
+          app: orders
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector:
+        matchLabels:
+          app: payment
+    ports:
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector:
+        matchLabels:
+          app: shipping
+    ports:
+    - protocol: TCP
+      port: 80
+---
+# Catalogue service ingress - only from front-end and user
+# Prevents direct attacks on catalogue
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: catalogue-ingress
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      app: catalogue
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: front-end
+    - podSelector:
+        matchLabels:
+          app: user
+    ports:
+    - protocol: TCP
+      port: 80
+---
+# Catalogue to database only
+# Prevent catalogue from being used as attack proxy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: catalogue-to-db
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      app: catalogue
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: catalogue-db
+    ports:
+    - protocol: TCP
+      port: 3306

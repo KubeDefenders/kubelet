@@ -1,0 +1,35 @@
+# Balanced Attack Strategy
+# Moderate intensity with both app and network vectors for realistic testing
+
+name: "Balanced Test"
+description: "Moderate multi-vector attack for testing mitigations"
+
+target_url: "http://target-service:8080"
+adapter_config: "configs/target-adapters/sock-shop.yaml"
+discovery_file: "discovered-endpoints.json"
+
+# Attack vector configuration
+app_level:
+  enabled: true
+  script: "crossfire_enhanced.py"
+  workers: 50
+  mode: "moderate"
+  pattern: "constant"
+  rate: 50  # 50 requests/second per worker
+  additional_args:
+    no-adaptation: false
+
+network_level:
+  enabled: true
+  script: "network_crossfire_enhanced.py"
+  workers: 10
+  protocol: "syn"
+  pattern: "constant"
+  pps: 1000  # 1000 packets/second per worker
+  additional_args:
+    no-adaptation: false
+
+# Attack phases (seconds)
+phases:
+  ramp_up: 30
+  ramp_down: 30

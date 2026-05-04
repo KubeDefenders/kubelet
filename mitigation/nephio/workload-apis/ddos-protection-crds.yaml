@@ -1,0 +1,508 @@
+---
+# Custom Resource Definition for DDoS Protection Intent
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ddosprotections.workload.nephio.org
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.0
+spec:
+  group: workload.nephio.org
+  names:
+    kind: DDoSProtection
+    listKind: DDoSProtectionList
+    plural: ddosprotections
+    singular: ddosprotection
+    shortNames:
+    - ddosp
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        description: DDoSProtection declares intent for DDoS attack mitigation
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required:
+            - intent
+            properties:
+              intent:
+                type: object
+                required:
+                - targetNamespace
+                - protectionLevel
+                properties:
+                  targetNamespace:
+                    type: string
+                    description: Namespace to protect
+                  protectionLevel:
+                    type: string
+                    enum:
+                    - low
+                    - medium
+                    - high
+                    - maximum
+                    description: Protection level determines mitigation aggressiveness
+                  attackTypes:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                      - http-flood
+                      - syn-flood
+                      - udp-flood
+                      - slowloris
+                      - dns-amplification
+                      - crossfire-app
+                      - crossfire-network
+                    description: Attack types to protect against
+                  capacity:
+                    type: object
+                    properties:
+                      requestsPerSecond:
+                        type: integer
+                        minimum: 1
+                        description: Total RPS capacity
+                      concurrentConnections:
+                        type: integer
+                        minimum: 1
+                      bandwidth:
+                        type: object
+                        properties:
+                          downlink:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]bps$'
+                          uplink:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]bps$'
+                  slo:
+                    type: object
+                    properties:
+                      availability:
+                        type: number
+                        minimum: 0
+                        maximum: 100
+                      latencyP50:
+                        type: string
+                        pattern: '^[0-9]+m?s$'
+                      latencyP95:
+                        type: string
+                        pattern: '^[0-9]+m?s$'
+                      latencyP99:
+                        type: string
+                        pattern: '^[0-9]+m?s$'
+                      errorRate:
+                        type: number
+                        minimum: 0
+                        maximum: 100
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                      - name
+                      - type
+                      - criticality
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                          enum:
+                          - gateway
+                          - critical
+                          - decoy
+                          - database
+                        criticality:
+                          type: string
+                          enum:
+                          - low
+                          - medium
+                          - high
+                          - maximum
+                        resources:
+                          type: object
+                          properties:
+                            cpu:
+                              type: string
+                            memory:
+                              type: string
+                  mitigations:
+                    type: object
+                    properties:
+                      rateLimiting:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          strategy:
+                            type: string
+                            enum:
+                            - adaptive
+                            - fixed
+                          global:
+                            type: integer
+                          perIP:
+                            type: integer
+                      circuitBreaking:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          consecutiveErrors:
+                            type: integer
+                          interval:
+                            type: string
+                          ejectionTime:
+                            type: string
+                      networkPolicies:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          defaultDeny:
+                            type: boolean
+                          allowDNS:
+                            type: boolean
+                      autoscaling:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          minReplicas:
+                            type: integer
+                          maxReplicas:
+                            type: integer
+                          targetCPU:
+                            type: integer
+                          targetMemory:
+                            type: integer
+                          scaleUpBehavior:
+                            type: string
+                            enum:
+                            - aggressive
+                            - conservative
+                          scaleDownBehavior:
+                            type: string
+                            enum:
+                            - aggressive
+                            - conservative
+                      resourceQuotas:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          cpuLimit:
+                            type: integer
+                          memoryLimit:
+                            type: string
+                          maxPods:
+                            type: integer
+                  networkFunctions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        enabled:
+                          type: boolean
+                        placement:
+                          type: string
+                          enum:
+                          - ingress
+                          - egress
+                          - service-mesh
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              capacityAllocated:
+                type: object
+                properties:
+                  cpu:
+                    type: string
+                  memory:
+                    type: string
+                  bandwidth:
+                    type: string
+              resourcesCreated:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+    additionalPrinterColumns:
+    - name: Protection Level
+      type: string
+      jsonPath: .spec.intent.protectionLevel
+    - name: Target Namespace
+      type: string
+      jsonPath: .spec.intent.targetNamespace
+    - name: RPS Capacity
+      type: integer
+      jsonPath: .spec.intent.capacity.requestsPerSecond
+    - name: Status
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+---
+# CapacityRequest CRD
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: capacityrequests.req.nephio.org
+spec:
+  group: req.nephio.org
+  names:
+    kind: CapacityRequest
+    listKind: CapacityRequestList
+    plural: capacityrequests
+    singular: capacityrequest
+    shortNames:
+    - capreq
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required:
+            - for
+            - capacity
+            properties:
+              for:
+                type: object
+                required:
+                - group
+                - kind
+                - name
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+              capacity:
+                type: object
+                properties:
+                  downlink:
+                    type: string
+                  uplink:
+                    type: string
+                  ipv4:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+                  ipv6:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+              placement:
+                type: object
+                properties:
+                  clusterSelector:
+                    type: object
+                    properties:
+                      matchLabels:
+                        type: object
+                        additionalProperties:
+                          type: string
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              allocated:
+                type: object
+                properties:
+                  downlink:
+                    type: string
+                  uplink:
+                    type: string
+                  ipv4Addresses:
+                    type: array
+                    items:
+                      type: string
+                  ipv6Addresses:
+                    type: array
+                    items:
+                      type: string
+    additionalPrinterColumns:
+    - name: For Kind
+      type: string
+      jsonPath: .spec.for.kind
+    - name: For Name
+      type: string
+      jsonPath: .spec.for.name
+    - name: Downlink
+      type: string
+      jsonPath: .spec.capacity.downlink
+    - name: Uplink
+      type: string
+      jsonPath: .spec.capacity.uplink
+    - name: Status
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Allocated")].status
+---
+# NFDeployment CRD for network function chaining
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nfdeployments.nf.nephio.org
+spec:
+  group: nf.nephio.org
+  names:
+    kind: NFDeployment
+    listKind: NFDeploymentList
+    plural: nfdeployments
+    singular: nfdeployment
+    shortNames:
+    - nfd
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required:
+            - nfChain
+            properties:
+              nfChain:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - name
+                  - function
+                  - image
+                  properties:
+                    name:
+                      type: string
+                    function:
+                      type: string
+                      enum:
+                      - attack-detection
+                      - rate-limiting
+                      - traffic-shaping
+                      - circuit-breaking
+                      - packet-filtering
+                    image:
+                      type: string
+                    config:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+              connectivityType:
+                type: string
+                enum:
+                - service-mesh
+                - cni
+                - sriov
+              serviceMesh:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                    enum:
+                    - istio
+                    - linkerd
+                    - consul
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+              deployedFunctions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    status:
+                      type: string
+    additionalPrinterColumns:
+    - name: Functions
+      type: integer
+      jsonPath: .spec.nfChain.length
+    - name: Connectivity
+      type: string
+      jsonPath: .spec.connectivityType
+    - name: Status
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Ready")].status

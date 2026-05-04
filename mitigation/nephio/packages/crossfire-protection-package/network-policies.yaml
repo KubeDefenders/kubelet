@@ -1,0 +1,168 @@
+---
+# Nephio-managed Network Policies for Crossfire Protection
+# Replicates kubernetes-native/network-policies functionality
+apiVersion: workload.nephio.org/v1alpha1
+kind: NetworkPolicy
+metadata:
+  name: anti-crossfire-decoy-isolation
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/package: crossfire-protection
+  annotations:
+    nephio.org/description: "Isolate decoy services from critical path"
+    nephio.org/protection-type: "crossfire-decoy-isolation"
+spec:
+  # Nephio intent-based specification
+  intent:
+    isolationLevel: high
+    serviceClass: decoy
+    allowedSources:
+      - front-end
+    allowedDestinations:
+      - catalogue-db
+      - cart-db
+      - user-db
+  
+  # Standard Kubernetes NetworkPolicy
+  policy:
+    podSelector:
+      matchLabels:
+        decoy-service: "true"
+    policyTypes:
+    - Ingress
+    - Egress
+    ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app: front-end
+      ports:
+      - protocol: TCP
+        port: 80
+    egress:
+    - to:
+      - podSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values: ["catalogue-db", "cart-db", "user-db", "carts-db"]
+      ports:
+      - protocol: TCP
+        port: 3306
+      - protocol: TCP
+        port: 27017
+    # DNS egress
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: kube-system
+      ports:
+      - protocol: UDP
+        port: 53
+---
+apiVersion: workload.nephio.org/v1alpha1
+kind: NetworkPolicy
+metadata:
+  name: anti-crossfire-critical-isolation
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/package: crossfire-protection
+  annotations:
+    nephio.org/description: "Protect critical services from crossfire"
+    nephio.org/protection-type: "crossfire-critical-isolation"
+spec:
+  intent:
+    isolationLevel: maximum
+    serviceClass: critical
+    allowedSources:
+      - front-end
+      - orders
+    allowedDestinations:
+      - orders-db
+      - shipping
+      - payment
+  
+  policy:
+    podSelector:
+      matchLabels:
+        critical-service: "true"
+    policyTypes:
+    - Ingress
+    - Egress
+    ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app: front-end
+      - podSelector:
+          matchLabels:
+            app: orders
+      ports:
+      - protocol: TCP
+        port: 80
+    egress:
+    - to:
+      - podSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values: ["orders-db", "shipping", "payment"]
+      ports:
+      - protocol: TCP
+        port: 80
+    # DNS egress
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: kube-system
+      ports:
+      - protocol: UDP
+        port: 53
+---
+# Nephio-exclusive: Dynamic Network Policy based on attack detection
+apiVersion: workload.nephio.org/v1alpha1
+kind: DynamicNetworkPolicy
+metadata:
+  name: attack-adaptive-isolation
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Dynamically adjust network policies based on detected attacks"
+spec:
+  # Nephio-exclusive feature: Attack-responsive network policies
+  trigger:
+    attackType: crossfire-app
+    detectionSource: ml-detector
+    threshold:
+      requestsPerSecond: 1000
+      anomalyScore: 0.8
+  
+  actions:
+  - type: isolate
+    target:
+      podSelector:
+        matchLabels:
+          under-attack: "true"
+    duration: 300s  # 5 minutes
+  
+  - type: rate-limit
+    target:
+      podSelector:
+        matchLabels:
+          app: front-end
+    limits:
+      connectionsPerSecond: 100
+      requestsPerSecond: 500
+  
+  - type: redirect
+    target:
+      podSelector:
+        matchLabels:
+          decoy-service: "true"
+    destination:
+      service: honeypot-sink
+      namespace: sock-shop

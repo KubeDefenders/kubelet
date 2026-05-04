@@ -1,0 +1,30 @@
+# Component Paths Configuration
+# Allows components to locate each other without hard-coding paths
+
+project_root: /home/spuggle/dev/ddos
+
+components:
+  target:
+    path: ${project_root}/target
+    manifests: ${project_root}/target/manifests
+    istio_config: ${project_root}/target/istio
+  
+  attacks:
+    path: ${project_root}/attacks
+    scripts: ${project_root}/attacks
+  
+  detection:
+    path: ${project_root}/detection
+    ml_detector: ${project_root}/detection/ml-detector
+    monitoring: ${project_root}/detection/monitoring
+  
+  mitigation:
+    path: ${project_root}/mitigation
+    kubernetes_native: ${project_root}/mitigation/kubernetes-native
+    istio_advanced: ${project_root}/mitigation/istio-advanced
+    nephio: ${project_root}/mitigation/nephio
+
+runtime:
+  cluster_ip: null  # Auto-detect with: minikube ip
+  target_url: null  # Auto-detect with: http://{cluster_ip}:30001
+  prometheus_url: null  # Auto-detect with: http://{cluster_ip}:30090

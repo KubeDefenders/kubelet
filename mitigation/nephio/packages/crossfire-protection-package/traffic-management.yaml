@@ -1,0 +1,275 @@
+---
+# Nephio-exclusive: Network Function chaining for DDoS mitigation
+# This is unique to Nephio - not available in vanilla Kubernetes
+apiVersion: workload.nephio.org/v1alpha1
+kind: NetworkFunctionChain
+metadata:
+  name: ddos-mitigation-chain
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Chain network functions for layered DDoS defense"
+spec:
+  # Define the mitigation chain
+  chain:
+  - name: traffic-scrubbing
+    function:
+      type: scrubber
+      image: nephio.org/traffic-scrubber:v1.0
+      config:
+        mode: inline
+        inspectHeaders: true
+        inspectPayload: false
+    resources:
+      requests:
+        cpu: 2
+        memory: 4Gi
+      limits:
+        cpu: 4
+        memory: 8Gi
+  
+  - name: rate-limiter
+    function:
+      type: rate-limiter
+      image: nephio.org/advanced-rate-limiter:v1.0
+      config:
+        algorithm: token-bucket
+        tokensPerSecond: 500
+        burstSize: 1000
+    resources:
+      requests:
+        cpu: 1
+        memory: 2Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+  
+  - name: anomaly-detector
+    function:
+      type: ml-detector
+      image: nephio.org/ml-anomaly-detector:v1.0
+      config:
+        model: crossfire-detector
+        threshold: 0.8
+        action: tag  # Tag suspicious traffic
+    resources:
+      requests:
+        cpu: 2
+        memory: 4Gi
+      limits:
+        cpu: 4
+        memory: 8Gi
+  
+  - name: traffic-shaper
+    function:
+      type: shaper
+      image: nephio.org/traffic-shaper:v1.0
+      config:
+        priority: high
+        queueSize: 10000
+    resources:
+      requests:
+        cpu: 1
+        memory: 2Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+  
+  # Deployment configuration
+  deployment:
+    replicas: 3
+    placement:
+      nodeSelector:
+        node-role: edge
+    antiAffinity: true
+  
+  # Routing
+  routing:
+    ingress:
+      source: istio-ingressgateway
+      namespace: istio-system
+    egress:
+      destination: front-end
+      namespace: sock-shop
+---
+# Nephio-exclusive: Dynamic traffic steering based on attack patterns
+apiVersion: workload.nephio.org/v1alpha1
+kind: DynamicTrafficSteering
+metadata:
+  name: attack-adaptive-routing
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Dynamically route traffic based on attack detection"
+spec:
+  # Traffic classification
+  classification:
+    enabled: true
+    mlEndpoint: http://ml-detector.sock-shop.svc.cluster.local:5000
+    classes:
+    - name: legitimate
+      action: route-normal
+      priority: high
+    - name: suspicious
+      action: route-scrubber
+      priority: medium
+    - name: attack
+      action: drop
+      priority: low
+  
+  # Routing rules
+  routes:
+  - name: normal-path
+    condition:
+      trafficClass: legitimate
+    destination:
+      service: front-end
+      namespace: sock-shop
+    weight: 100
+  
+  - name: scrubbing-path
+    condition:
+      trafficClass: suspicious
+    destination:
+      service: traffic-scrubber
+      namespace: sock-shop
+    weight: 100
+    next:
+      service: front-end
+      namespace: sock-shop
+  
+  - name: honeypot-path
+    condition:
+      trafficClass: attack
+      attackType: crossfire-app
+    destination:
+      service: honeypot-sink
+      namespace: sock-shop
+    weight: 100
+    terminal: true  # Don't forward to real services
+  
+  # Dynamic adjustment
+  dynamicAdjustment:
+    enabled: true
+    evaluationInterval: 10s
+    metrics:
+    - requestRate
+    - errorRate
+    - anomalyScore
+---
+# Nephio-exclusive: Multi-cluster traffic distribution
+apiVersion: workload.nephio.org/v1alpha1
+kind: MultiClusterTrafficDistribution
+metadata:
+  name: crossfire-load-distribution
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Distribute traffic across clusters during attack"
+spec:
+  # Attack-triggered distribution
+  trigger:
+    attackDetected: true
+    attackType: crossfire-app
+    threshold:
+      requestsPerSecond: 5000
+      errorRate: 5
+  
+  # Cluster distribution strategy
+  distribution:
+    strategy: weighted-least-connections
+    clusters:
+    - name: edge-cluster-01
+      weight: 40
+      healthCheck:
+        enabled: true
+        endpoint: /health
+        interval: 5s
+    
+    - name: edge-cluster-02
+      weight: 30
+      healthCheck:
+        enabled: true
+        endpoint: /health
+        interval: 5s
+    
+    - name: core-cluster-01
+      weight: 30
+      healthCheck:
+        enabled: true
+        endpoint: /health
+        interval: 5s
+  
+  # Spillover configuration
+  spillover:
+    enabled: true
+    threshold: 80  # % capacity
+    spilloverDelay: 5s
+  
+  # Geo-routing (route to nearest healthy cluster)
+  geoRouting:
+    enabled: true
+    preference: latency
+    fallback: any-available
+---
+# Nephio-exclusive: Service mesh circuit breaker coordination
+apiVersion: workload.nephio.org/v1alpha1
+kind: CircuitBreakerCoordination
+metadata:
+  name: coordinated-circuit-breakers
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Coordinate circuit breakers across service mesh"
+spec:
+  # Circuit breaker settings per service
+  services:
+  - name: front-end
+    circuitBreaker:
+      maxConnections: 100
+      maxPendingRequests: 50
+      maxRequests: 200
+      maxRequestsPerConnection: 2
+      consecutiveErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  
+  - name: catalogue
+    circuitBreaker:
+      maxConnections: 150
+      maxPendingRequests: 75
+      maxRequests: 300
+      maxRequestsPerConnection: 2
+      consecutiveErrors: 3
+      interval: 5s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  
+  - name: cart
+    circuitBreaker:
+      maxConnections: 100
+      maxPendingRequests: 50
+      maxRequests: 200
+      maxRequestsPerConnection: 2
+      consecutiveErrors: 3
+      interval: 5s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  
+  # Cascading failure prevention
+  cascadePrevention:
+    enabled: true
+    propagationDelay: 5s
+    isolationStrategy: progressive
+    
+  # Coordinated recovery
+  recovery:
+    strategy: gradual
+    testTrafficPercent: 10
+    successThreshold: 80
+    evaluationPeriod: 60s

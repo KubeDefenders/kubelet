@@ -1,0 +1,406 @@
+---
+# Network-Level Mitigation: NetworkPolicies
+# Restricts pod-to-pod and external traffic to prevent direct attacks on backend services
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: networkpolicy-config
+  namespace: sock-shop
+data:
+  README: |
+    Network Policy Configuration for Crossfire Attack Prevention
+    
+    Problem:
+    - Attack traffic went directly to decoy services (catalogue, carts, user)
+    - No network-level restrictions
+    - Backend services exposed to external traffic
+    
+    Solution:
+    - Block direct external access to backend services
+    - Only allow front-end → backend communication
+    - Enforce service mesh topology
+    - Limit attack surface to front-end only
+    
+    Result: Network-level crossfire attacks blocked at pod firewall
+
+---
+# Default Deny All - Start with zero trust
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: sock-shop
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# Front-End Network Policy - Allow external traffic (entry point)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: front-end-allow-external
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: front-end
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system       # Allow from Istio ingress gateway
+    ports:
+    - protocol: TCP
+      port: 8079
+  - from: []                       # Allow from any (external traffic)
+    ports:
+    - protocol: TCP
+      port: 8079
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: catalogue          # Can call catalogue
+  - to:
+    - podSelector:
+        matchLabels:
+          name: carts              # Can call carts
+  - to:
+    - podSelector:
+        matchLabels:
+          name: user               # Can call user
+  - to:
+    - podSelector:
+        matchLabels:
+          name: orders             # Can call orders
+  - to:                            # Allow DNS
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Catalogue Network Policy - BLOCK direct external access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: catalogue-deny-external
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: catalogue
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: front-end          # Only allow from front-end
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: catalogue-db       # Can access database
+  - to:                            # Allow DNS
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Carts Network Policy - BLOCK direct external access (critical - had 99% failure)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: carts-deny-external
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: carts
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: front-end          # Only allow from front-end
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: carts-db           # Can access database
+  - to:                            # Allow DNS
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# User Network Policy - BLOCK direct external access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: user-deny-external
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: user
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: front-end          # Only allow from front-end
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: user-db
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Orders Network Policy - Target service (protect)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orders-deny-external
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: orders
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: front-end
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: orders-db
+  - to:
+    - podSelector:
+        matchLabels:
+          name: shipping           # Orders can call shipping
+  - to:
+    - podSelector:
+        matchLabels:
+          name: payment            # Orders can call payment
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Database Network Policies - Restrict to service layer only
+
+# Carts-DB - Only carts service can access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: carts-db-policy
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: carts-db
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: carts
+    ports:
+    - protocol: TCP
+      port: 27017
+
+---
+# Catalogue-DB - Only catalogue service can access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: catalogue-db-policy
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+          name: catalogue-db
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: catalogue
+    ports:
+    - protocol: TCP
+      port: 3306
+
+---
+# Orders-DB - Only orders service can access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orders-db-policy
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: orders-db
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: orders
+    ports:
+    - protocol: TCP
+      port: 27017
+
+---
+# User-DB - Only user service can access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: user-db-policy
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: user-db
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: user
+    ports:
+    - protocol: TCP
+      port: 27017
+
+---
+# Payment Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payment-policy
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: payment
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: orders
+    ports:
+    - protocol: TCP
+      port: 80
+
+---
+# Shipping Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shipping-policy
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: shipping
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: orders
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          name: queue-master
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Queue-Master Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: queue-master-policy
+  namespace: sock-shop
+spec:
+  podSelector:
+    matchLabels:
+      name: queue-master
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          name: shipping
+    ports:
+    - protocol: TCP
+      port: 80

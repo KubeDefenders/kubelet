@@ -1,0 +1,67 @@
+---
+# Default Deny All Ingress Traffic
+# This is the foundation - block everything by default, then selectively allow
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all-ingress
+  namespace: sock-shop
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+---
+# Default Deny All Egress Traffic
+# Prevent compromised pods from attacking external targets
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all-egress
+  namespace: sock-shop
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+---
+# Allow DNS for all pods
+# Pods need DNS resolution
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-access
+  namespace: sock-shop
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Allow access to Kubernetes API
+# For service discovery and metadata
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kube-api-access
+  namespace: sock-shop
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          component: apiserver
+    ports:
+    - protocol: TCP
+      port: 443

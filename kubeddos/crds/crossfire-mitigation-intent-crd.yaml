@@ -1,0 +1,342 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: crossfiremitigationintents.crossfire.io
+  labels:
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+    app.kubernetes.io/managed-by: crossfire-controller
+  annotations:
+    crossfire.io/description: >
+      Declarative intent for indirect crossfire mitigation.
+      Created by the IntentGenerator; reconciled into Kubernetes-native
+      resources by the CrossfireMitigationController.
+      This CRD embodies the Nephio principle of intent-based networking:
+      the operator declares *what* protection is needed; the controller
+      determines *how* to implement it using standard Kubernetes APIs.
+spec:
+  group: crossfire.io
+  scope: Cluster
+  names:
+    plural: crossfiremitigationintents
+    singular: crossfiremitigationintent
+    kind: CrossfireMitigationIntent
+    shortNames:
+    - cmi
+    - cfmi
+    categories:
+    - crossfire
+    - networking
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.affectedNode
+    - name: Strategy
+      type: string
+      jsonPath: .spec.strategy.type
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    - name: TTL
+      type: integer
+      jsonPath: .spec.ttlSeconds
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+
+          spec:
+            type: object
+            description: >
+              Desired mitigation state. This is the INTENT — what protection
+              the system needs, not how to achieve it. The controller is
+              responsible for translating this intent into concrete Kubernetes
+              resources.
+            required:
+            - triggerEventRef
+            - affectedNode
+            - congestedInterface
+            - decoyPods
+            - victimPods
+            - strategy
+            - ttlSeconds
+            properties:
+              triggerEventRef:
+                type: string
+                description: >
+                  Name of the CrossfireDetectionEvent that triggered this intent.
+                  Immutable after creation.
+                minLength: 1
+
+              affectedNode:
+                type: string
+                description: >
+                  Name of the Kubernetes node where crossfire congestion
+                  was detected.
+                minLength: 1
+
+              congestedInterface:
+                type: string
+                description: >
+                  Linux network interface on affectedNode that is congested.
+                minLength: 1
+
+              decoyPods:
+                type: array
+                description: >
+                  Pods identified as primary bandwidth consumers to be
+                  constrained by the mitigation.
+                minItems: 1
+                items:
+                  type: object
+                  required: [namespace, name]
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    deploymentName:
+                      type: string
+                      description: >
+                        If the pod belongs to a Deployment, this allows the
+                        controller to patch the Deployment spec for durable
+                        eviction.
+
+              victimPods:
+                type: array
+                description: >
+                  Pods experiencing crossfire degradation that should be
+                  protected.
+                minItems: 1
+                items:
+                  type: object
+                  required: [namespace, name]
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    deploymentName:
+                      type: string
+                      description: >
+                        If the pod belongs to a Deployment, this allows the
+                        controller to patch priority and topology constraints
+                        on the Deployment for durable effect.
+
+              strategy:
+                type: object
+                description: >
+                  The mitigation strategy. Specifies WHAT the desired
+                  protection level is. The controller determines the
+                  specific Kubernetes resources to create or modify.
+                required: [type]
+                properties:
+                  type:
+                    type: string
+                    description: >
+                      Mitigation strategy to apply.
+                      BandwidthConstraint: annotate decoy pods with CNI
+                        bandwidth limits (requires bandwidth-capable CNI).
+                      PriorityElevation: create PriorityClass for victim
+                        pods and patch their Deployments to use it.
+                      TopologyEviction: taint the congested node and spread
+                        victim pods, redirect decoy pods away.
+                      Hybrid: apply all three strategies in order.
+                    enum:
+                    - BandwidthConstraint
+                    - PriorityElevation
+                    - TopologyEviction
+                    - Hybrid
+
+                  decoyEgressLimitMbps:
+                    type: integer
+                    minimum: 1
+                    description: >
+                      [BandwidthConstraint, Hybrid] Maximum egress bandwidth
+                      in Mbps to allow from each decoy pod. Applied via the
+                      kubernetes.io/egress-bandwidth pod annotation.
+                      Default: 100
+
+                  decoyIngressLimitMbps:
+                    type: integer
+                    minimum: 1
+                    description: >
+                      [BandwidthConstraint, Hybrid] Maximum ingress bandwidth
+                      in Mbps for each decoy pod. Applied via the
+                      kubernetes.io/ingress-bandwidth pod annotation.
+                      Default: 100
+
+                  victimPriorityValue:
+                    type: integer
+                    minimum: 1
+                    maximum: 1000000000
+                    description: >
+                      [PriorityElevation, Hybrid] Numeric priority value for
+                      the PriorityClass created for victim pods.
+                      Default: 1000000 (elevated, below system-cluster-critical).
+
+                  victimPriorityClassName:
+                    type: string
+                    description: >
+                      [PriorityElevation, Hybrid] Name of the PriorityClass
+                      to create. Default: crossfire-victim-priority.
+
+                  originalVictimPriorityClassName:
+                    type: string
+                    description: >
+                      [PriorityElevation, Hybrid] The priority class name
+                      on the victim Deployment before patching, saved for
+                      revert. Set by the controller, not the intent generator.
+
+                  evictDecoysFromNode:
+                    type: boolean
+                    default: true
+                    description: >
+                      [TopologyEviction, Hybrid] If true, add anti-affinity
+                      to decoy Deployments to prevent their pods from being
+                      scheduled on the congested node after eviction.
+
+                  decoyMaxReplicas:
+                    type: integer
+                    minimum: 0
+                    description: >
+                      [Hybrid] Scale decoy Deployments down to this many
+                      replicas (default 0) and delete decoy DaemonSets.
+                      The controller discovers decoy pod owners via the
+                      Kubernetes ownerReferences API. Original replica
+                      counts are saved in appliedResources for revert.
+
+                  scaleUpVictimMinReplicas:
+                    type: integer
+                    minimum: 1
+                    description: >
+                      [TopologyEviction, Hybrid] If set, patch the victim
+                      Deployment's HPA minReplicas to this value, ensuring
+                      the victim service has sufficient replicas on
+                      uncongested nodes.
+
+                  victimScaleUpReplicas:
+                    type: integer
+                    minimum: 1
+                    description: >
+                      [Hybrid] Scale victim Deployments to this many replicas
+                      during mitigation for increased capacity. Original
+                      replica counts are saved for revert. Default: 3.
+
+              ttlSeconds:
+                type: integer
+                minimum: 30
+                maximum: 3600
+                description: >
+                  Time-to-live in seconds. The controller automatically
+                  reverts all applied resources after this duration,
+                  even if the detection event has not been explicitly resolved.
+                  This ensures mitigations do not persist indefinitely.
+                  Default: 300 (5 minutes).
+
+          status:
+            type: object
+            description: >
+              Controller-managed status. Records the current reconciliation
+              phase and all Kubernetes resources created or modified by
+              this intent (for accurate revert tracking).
+            properties:
+              phase:
+                type: string
+                description: >
+                  Current reconciliation phase.
+                  Pending:   Intent created, controller has not yet acted.
+                  Active:    Mitigation resources applied, continuously reconciled.
+                  Reverting: TTL expired or explicit deletion; reverting resources.
+                  Completed: All resources reverted. Terminal state.
+                  Failed:    Unrecoverable error. See conditions for details.
+                enum:
+                - Pending
+                - Active
+                - Reverting
+                - Completed
+                - Failed
+
+              appliedAt:
+                type: string
+                format: date-time
+                description: When the controller first transitioned to Active.
+
+              revertedAt:
+                type: string
+                format: date-time
+                description: When the controller completed the Reverting phase.
+
+              appliedResources:
+                type: array
+                description: >
+                  List of Kubernetes resources created or modified by this
+                  intent. Used by the controller for accurate revert.
+                  Owner references are also set on created resources.
+                items:
+                  type: object
+                  required: [kind, name]
+                  properties:
+                    apiVersion:
+                      type: string
+                    kind:
+                      type: string
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    action:
+                      type: string
+                      enum: [Created, Patched, Annotated, Scaled, Deleted]
+                    revertData:
+                      type: object
+                      description: >
+                        Snapshot of fields before modification, used
+                        for accurate revert (e.g., original annotations,
+                        original priorityClassName).
+                      x-kubernetes-preserve-unknown-fields: true
+
+              conditions:
+                type: array
+                description: Standard Kubernetes conditions array.
+                items:
+                  type: object
+                  required: [type, status]
+                  properties:
+                    type:
+                      type: string
+                      description: >
+                        Condition types:
+                        Ready: mitigation is fully active.
+                        BandwidthConstraintApplied.
+                        BandwidthConstraintEffective: verified via metrics.
+                        BandwidthConstraintIneffective: CNI doesn't support it.
+                        PriorityElevationApplied.
+                        TopologyEvictionApplied.
+                        Reverted: revert completed.
+                        Degraded: partial application, some steps failed.
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+
+              message:
+                type: string
+                description: >
+                  Human-readable summary of the current controller status.
+                  Intended for operator display.

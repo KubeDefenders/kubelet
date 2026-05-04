@@ -1,0 +1,126 @@
+---
+# Nephio-managed Resource Quotas for Crossfire Protection
+# Replicates kubernetes-native/resource-quotas functionality
+apiVersion: workload.nephio.org/v1alpha1
+kind: ResourceQuota
+metadata:
+  name: sock-shop-quota
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/package: crossfire-protection
+  annotations:
+    nephio.org/description: "Namespace-level resource quota"
+spec:
+  # Nephio capacity injection
+  intent:
+    namespace: sock-shop
+    capacityClass: medium
+    protectionLevel: high
+  
+  # Standard ResourceQuota
+  quota:
+    hard:
+      requests.cpu: "20" # kpt-set: ${max-cpu}
+      requests.memory: 32Gi # kpt-set: ${max-memory}
+      limits.cpu: "40"
+      limits.memory: 64Gi
+      pods: "100"
+      services: "50"
+      persistentvolumeclaims: "20"
+      requests.storage: "100Gi"
+      services.loadbalancers: "5"
+      services.nodeports: "10"
+---
+apiVersion: workload.nephio.org/v1alpha1
+kind: ResourceQuota
+metadata:
+  name: critical-services-quota
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/priority: critical
+  annotations:
+    nephio.org/description: "Resource quota for critical services"
+spec:
+  intent:
+    serviceClass: critical
+    guaranteedResources: true
+  
+  quota:
+    hard:
+      requests.cpu: "10"
+      requests.memory: 16Gi
+      limits.cpu: "20"
+      limits.memory: 32Gi
+    scopeSelector:
+      matchExpressions:
+      - operator: In
+        scopeName: PriorityClass
+        values: ["critical-priority"]
+---
+apiVersion: workload.nephio.org/v1alpha1
+kind: ResourceQuota
+metadata:
+  name: decoy-services-quota
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/priority: decoy
+  annotations:
+    nephio.org/description: "Limited resources for decoy services"
+spec:
+  intent:
+    serviceClass: decoy
+    burstable: true
+  
+  quota:
+    hard:
+      requests.cpu: "5"
+      requests.memory: 8Gi
+      limits.cpu: "10"
+      limits.memory: 16Gi
+    scopeSelector:
+      matchExpressions:
+      - operator: In
+        scopeName: PriorityClass
+        values: ["decoy-priority"]
+---
+# Nephio-exclusive: Dynamic quota adjustment based on attack
+apiVersion: workload.nephio.org/v1alpha1
+kind: DynamicResourceQuota
+metadata:
+  name: attack-responsive-quota
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Dynamically adjust quotas during attack"
+spec:
+  # Automatically increase quotas when attack detected
+  trigger:
+    attackDetected: true
+    severity: high
+  
+  # Normal state quotas
+  normalState:
+    requests.cpu: "20"
+    requests.memory: 32Gi
+    limits.cpu: "40"
+    limits.memory: 64Gi
+    pods: "100"
+  
+  # Attack state quotas (increased)
+  attackState:
+    requests.cpu: "40"
+    requests.memory: 64Gi
+    limits.cpu: "80"
+    limits.memory: 128Gi
+    pods: "200"
+  
+  # Transition settings
+  transition:
+    duration: 60s
+    cooldown: 600s
+    autoRevert: true
+    revertDelay: 900s

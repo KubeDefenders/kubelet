@@ -1,0 +1,265 @@
+---
+# Global rate limiter service
+# This service implements token bucket rate limiting
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ratelimit-config
+  namespace: istio-system
+data:
+  config.yaml: |
+    domain: sock-shop-ratelimit
+    descriptors:
+      # Global rate limit: 1000 req/s
+      - key: global
+        rate_limit:
+          unit: second
+          requests_per_unit: 1000
+      
+      # Per-IP rate limit: 100 req/s
+      - key: remote_address
+        rate_limit:
+          unit: second
+          requests_per_unit: 100
+      
+      # Front-end service: 500 req/s
+      - key: destination_service
+        value: front-end.sock-shop.svc.cluster.local
+        rate_limit:
+          unit: second
+          requests_per_unit: 500
+      
+      # Catalogue service (decoy): 200 req/s per IP
+      - key: destination_service
+        value: catalogue.sock-shop.svc.cluster.local
+        descriptors:
+          - key: remote_address
+            rate_limit:
+              unit: second
+              requests_per_unit: 200
+      
+      # Cart service (decoy): 150 req/s per IP
+      - key: destination_service
+        value: carts.sock-shop.svc.cluster.local
+        descriptors:
+          - key: remote_address
+            rate_limit:
+              unit: second
+              requests_per_unit: 150
+      
+      # User service (decoy): 100 req/s per IP
+      - key: destination_service
+        value: user.sock-shop.svc.cluster.local
+        descriptors:
+          - key: remote_address
+            rate_limit:
+              unit: second
+              requests_per_unit: 100
+      
+      # Payment service (critical): 50 req/s per IP (strict)
+      - key: destination_service
+        value: payment.sock-shop.svc.cluster.local
+        descriptors:
+          - key: remote_address
+            rate_limit:
+              unit: second
+              requests_per_unit: 50
+      
+      # Orders service (critical): 50 req/s per IP
+      - key: destination_service
+        value: orders.sock-shop.svc.cluster.local
+        descriptors:
+          - key: remote_address
+            rate_limit:
+              unit: second
+              requests_per_unit: 50
+      
+      # Endpoint-specific limits
+      # /catalogue endpoint: 300 req/s
+      - key: header_match
+        value: path_catalogue
+        rate_limit:
+          unit: second
+          requests_per_unit: 300
+      
+      # /cart endpoint: 200 req/s
+      - key: header_match
+        value: path_cart
+        rate_limit:
+          unit: second
+          requests_per_unit: 200
+      
+      # /checkout endpoint (critical): 30 req/s
+      - key: header_match
+        value: path_checkout
+        rate_limit:
+          unit: second
+          requests_per_unit: 30
+---
+# Rate limit service deployment
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: istio-system
+  labels:
+    app: redis
+spec:
+  ports:
+  - name: redis
+    port: 6379
+  selector:
+    app: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: istio-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - image: redis:alpine
+        name: redis
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ratelimit
+  namespace: istio-system
+  labels:
+    app: ratelimit
+spec:
+  ports:
+  - name: http-port
+    port: 8080
+  - name: grpc-port
+    port: 8081
+  selector:
+    app: ratelimit
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ratelimit
+  namespace: istio-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ratelimit
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: ratelimit
+    spec:
+      containers:
+      - image: envoyproxy/ratelimit:master
+        imagePullPolicy: Always
+        name: ratelimit
+        command: ["/bin/ratelimit"]
+        env:
+        - name: LOG_LEVEL
+          value: debug
+        - name: REDIS_SOCKET_TYPE
+          value: tcp
+        - name: REDIS_URL
+          value: redis:6379
+        - name: USE_STATSD
+          value: "false"
+        - name: RUNTIME_ROOT
+          value: /data
+        - name: RUNTIME_SUBDIRECTORY
+          value: ratelimit
+        ports:
+        - containerPort: 8080
+        - containerPort: 8081
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 1
+            memory: 1Gi
+        volumeMounts:
+        - name: config-volume
+          mountPath: /data/ratelimit/config
+      volumes:
+      - name: config-volume
+        configMap:
+          name: ratelimit-config
+---
+# EnvoyFilter to enable rate limiting
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: filter-ratelimit
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  # HTTP filter for rate limiting
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: "envoy.filters.network.http_connection_manager"
+            subFilter:
+              name: "envoy.filters.http.router"
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.ratelimit
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.http.ratelimit.v3.RateLimit
+          domain: sock-shop-ratelimit
+          failure_mode_deny: false  # Fail open to avoid blocking legitimate traffic
+          rate_limit_service:
+            grpc_service:
+              envoy_grpc:
+                cluster_name: rate_limit_cluster
+            transport_api_version: V3
+  # Cluster definition for rate limit service
+  - applyTo: CLUSTER
+    match:
+      context: GATEWAY
+    patch:
+      operation: ADD
+      value:
+        name: rate_limit_cluster
+        type: STRICT_DNS
+        connect_timeout: 1s
+        lb_policy: ROUND_ROBIN
+        http2_protocol_options: {}
+        load_assignment:
+          cluster_name: rate_limit_cluster
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: ratelimit.istio-system.svc.cluster.local
+                    port_value: 8081

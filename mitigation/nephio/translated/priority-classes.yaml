@@ -1,0 +1,43 @@
+---
+# Nephio-Enhanced PriorityClasses
+# Service classification for workload prioritization
+# Key Nephio concept: Critical/Normal/Decoy service tiers
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: critical-priority
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: "critical"
+  annotations:
+    nephio.org/description: "Highest priority for critical business services"
+value: 1000000
+globalDefault: false
+description: "Critical services (orders, payment) - highest priority, last to be evicted"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: normal-priority
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: "normal"
+value: 100000
+globalDefault: true
+description: "Normal priority for standard workloads (front-end, user)"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: decoy-priority
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: "decoy"
+  annotations:
+    nephio.org/description: "Lowest priority for decoy services - first to be evicted"
+value: 10000
+globalDefault: false
+description: "Decoy services (catalogue, carts) - lowest priority, sacrificial in resource contention"

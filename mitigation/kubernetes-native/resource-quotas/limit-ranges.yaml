@@ -1,0 +1,103 @@
+---
+# Default resource limits for all pods
+# Prevents a single pod from consuming excessive resources
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limits
+  namespace: sock-shop
+spec:
+  limits:
+  # Container limits
+  - max:
+      cpu: "2"          # No container can use more than 2 CPUs
+      memory: "4Gi"     # No container can use more than 4GB RAM
+    min:
+      cpu: "10m"        # Minimum CPU to prevent scheduling issues
+      memory: "64Mi"    # Minimum memory
+    default:
+      cpu: "500m"       # Default CPU limit if not specified
+      memory: "512Mi"   # Default memory limit
+    defaultRequest:
+      cpu: "100m"       # Default CPU request
+      memory: "128Mi"   # Default memory request
+    type: Container
+  
+  # Pod limits (sum of all containers)
+  - max:
+      cpu: "4"          # Maximum CPU per pod
+      memory: "8Gi"     # Maximum memory per pod
+    type: Pod
+  
+  # PVC limits
+  - max:
+      storage: "10Gi"   # Maximum storage per PVC
+    min:
+      storage: "1Gi"    # Minimum storage per PVC
+    type: PersistentVolumeClaim
+---
+# Critical service limits (higher resources)
+# For payment, orders, shipping - need protection
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: critical-service-limits
+  namespace: sock-shop
+spec:
+  limits:
+  - max:
+      cpu: "4"
+      memory: "8Gi"
+    min:
+      cpu: "100m"
+      memory: "256Mi"
+    default:
+      cpu: "1"
+      memory: "2Gi"
+    defaultRequest:
+      cpu: "500m"
+      memory: "512Mi"
+    type: Container
+---
+# Decoy service limits (constrained resources)
+# For catalogue, cart, user - potential flood targets
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: decoy-service-limits
+  namespace: sock-shop
+spec:
+  limits:
+  - max:
+      cpu: "1"          # Limited CPU for decoy services
+      memory: "2Gi"     # Limited memory
+    min:
+      cpu: "50m"
+      memory: "128Mi"
+    default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "256Mi"
+    type: Container
+---
+# Connection limits via container limits
+# Linux kernel connection tracking limits
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: connection-limits
+  namespace: sock-shop
+  annotations:
+    description: "Indirect connection limits via file descriptors"
+spec:
+  limits:
+  - max:
+      # File descriptor limits (indirect connection control)
+      # Each connection needs a file descriptor
+      # Typical Linux default is 1024, we limit to prevent exhaustion
+      ephemeral-storage: "2Gi"  # Limit logs and temp files
+    default:
+      ephemeral-storage: "1Gi"
+    type: Container

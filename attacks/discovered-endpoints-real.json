@@ -1,0 +1,87 @@
+{
+  "base_url": "http://localhost:9000",
+  "discovered_urls": [
+    "http://localhost:9000/",
+    "http://localhost:9000/index.html",
+    "http://localhost:9000/basket.html",
+    "http://localhost:9000/detail.html",
+    "http://localhost:9000/catalogue",
+    "http://localhost:9000/catalogue/size",
+    "http://localhost:9000/tags",
+    "http://localhost:9000/cart",
+    "http://localhost:9000/orders",
+    "http://localhost:9000/customers",
+    "http://localhost:9000/cards",
+    "http://localhost:9000/addresses",
+    "http://localhost:9000/login",
+    "http://localhost:9000/register"
+  ],
+  "api_endpoints": [
+    "http://localhost:9000/catalogue",
+    "http://localhost:9000/catalogue/size",
+    "http://localhost:9000/tags",
+    "http://localhost:9000/cart",
+    "http://localhost:9000/orders",
+    "http://localhost:9000/customers",
+    "http://localhost:9000/cards",
+    "http://localhost:9000/addresses"
+  ],
+  "endpoint_profiles": {
+    "http://localhost:9000/catalogue": {
+      "url": "http://localhost:9000/catalogue",
+      "methods": ["GET"],
+      "description": "List all products - resource intensive (database query)",
+      "expected_status": 200,
+      "target_type": "primary"
+    },
+    "http://localhost:9000/catalogue/size": {
+      "url": "http://localhost:9000/catalogue/size",
+      "methods": ["GET"],
+      "description": "Get catalogue size - quick query",
+      "expected_status": 200,
+      "target_type": "decoy"
+    },
+    "http://localhost:9000/tags": {
+      "url": "http://localhost:9000/tags",
+      "methods": ["GET"],
+      "description": "List product tags - moderate load",
+      "expected_status": 200,
+      "target_type": "decoy"
+    },
+    "http://localhost:9000/cart": {
+      "url": "http://localhost:9000/cart",
+      "methods": ["GET", "POST", "DELETE"],
+      "description": "Shopping cart operations - session heavy",
+      "expected_status": 201,
+      "target_type": "primary"
+    },
+    "http://localhost:9000/orders": {
+      "url": "http://localhost:9000/orders",
+      "methods": ["GET", "POST"],
+      "description": "Order processing - critical business logic",
+      "expected_status": 201,
+      "target_type": "primary"
+    },
+    "http://localhost:9000/": {
+      "url": "http://localhost:9000/",
+      "methods": ["GET"],
+      "description": "Home page - static content",
+      "expected_status": 200,
+      "target_type": "decoy"
+    }
+  },
+  "attack_strategy": {
+    "primary_targets": [
+      "http://localhost:9000/catalogue",
+      "http://localhost:9000/cart",
+      "http://localhost:9000/orders"
+    ],
+    "decoy_targets": [
+      "http://localhost:9000/",
+      "http://localhost:9000/catalogue/size",
+      "http://localhost:9000/tags"
+    ],
+    "decoy_weight": 0.7,
+    "primary_weight": 0.3
+  }
+}

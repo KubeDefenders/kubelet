@@ -1,0 +1,171 @@
+---
+# Canary deployment for front-end: Route 90% to stable, 10% to canary
+# Useful during DDoS to test new mitigation strategies safely
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: front-end-canary
+  namespace: sock-shop
+spec:
+  hosts:
+  - front-end.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - headers:
+        x-canary-test:              # Force canary for testing
+          exact: "true"
+    route:
+    - destination:
+        host: front-end.sock-shop.svc.cluster.local
+        subset: canary
+      weight: 100
+  - route:
+    - destination:
+        host: front-end.sock-shop.svc.cluster.local
+        subset: stable
+      weight: 90
+    - destination:
+        host: front-end.sock-shop.svc.cluster.local
+        subset: canary
+      weight: 10
+---
+# DestinationRule defining canary and stable subsets
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: front-end-subsets
+  namespace: sock-shop
+spec:
+  host: front-end.sock-shop.svc.cluster.local
+  subsets:
+  - name: stable
+    labels:
+      version: stable
+    trafficPolicy:
+      connectionPool:
+        tcp:
+          maxConnections: 100
+        http:
+          http1MaxPendingRequests: 50
+          http2MaxRequests: 100
+  - name: canary
+    labels:
+      version: canary
+    trafficPolicy:
+      connectionPool:
+        tcp:
+          maxConnections: 50        # Lower limits for canary
+        http:
+          http1MaxPendingRequests: 25
+          http2MaxRequests: 50
+---
+# Example front-end canary deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: front-end-canary
+  namespace: sock-shop
+  labels:
+    app: front-end
+    version: canary
+spec:
+  replicas: 1                       # Start with 1 replica
+  selector:
+    matchLabels:
+      app: front-end
+      version: canary
+  template:
+    metadata:
+      labels:
+        app: front-end
+        version: canary
+    spec:
+      containers:
+      - name: front-end
+        image: weaveworksdemos/front-end:0.3.12  # New version with enhanced DDoS protection
+        ports:
+        - containerPort: 8079
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        env:
+        - name: SESSION_REDIS
+          value: "true"
+        - name: ENABLE_RATE_LIMITING  # New feature
+          value: "true"
+---
+# Progressive traffic shifting: Gradually increase canary traffic
+# Day 1: 10%, Day 2: 25%, Day 3: 50%, Day 4: 75%, Day 5: 100%
+# Update VirtualService progressively based on metrics
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: front-end-progressive-rollout
+  namespace: sock-shop
+spec:
+  hosts:
+  - front-end.sock-shop.svc.cluster.local
+  http:
+  - route:
+    - destination:
+        host: front-end.sock-shop.svc.cluster.local
+        subset: stable
+      weight: 50                    # Day 3: 50/50 split
+    - destination:
+        host: front-end.sock-shop.svc.cluster.local
+        subset: canary
+      weight: 50
+---
+# Anti-Crossfire canary: Test decoy service hardening
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: catalogue-hardened-canary
+  namespace: sock-shop
+spec:
+  hosts:
+  - catalogue.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - sourceLabels:
+        attack-test: "crossfire"    # Route attack traffic to hardened version
+    route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+        subset: hardened
+      weight: 100
+  - route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+        subset: standard
+      weight: 100
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: catalogue-hardened-subsets
+  namespace: sock-shop
+spec:
+  host: catalogue.sock-shop.svc.cluster.local
+  subsets:
+  - name: standard
+    labels:
+      version: standard
+  - name: hardened
+    labels:
+      version: hardened
+    trafficPolicy:
+      connectionPool:
+        tcp:
+          maxConnections: 50        # Aggressive limits
+        http:
+          http1MaxPendingRequests: 10
+          http2MaxRequests: 25
+      outlierDetection:
+        consecutive5xxErrors: 1     # Fail fast
+        interval: 5s
+        baseEjectionTime: 30s

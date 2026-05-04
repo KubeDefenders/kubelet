@@ -1,0 +1,35 @@
+# Aggressive Stress Test Strategy
+# High-intensity attack for stress testing infrastructure limits
+
+name: "Aggressive Stress Test"
+description: "High-intensity sustained attack with burst patterns"
+
+target_url: "http://target-service:8080"
+adapter_config: "configs/target-adapters/sock-shop.yaml"
+discovery_file: "discovered-endpoints.json"
+
+# Attack vector configuration
+app_level:
+  enabled: true
+  script: "crossfire_enhanced.py"
+  workers: 100
+  mode: "aggressive"
+  pattern: "burst"
+  rate: 200  # 200 requests/second per worker
+  additional_args:
+    no-adaptation: false
+
+network_level:
+  enabled: true
+  script: "network_crossfire_enhanced.py"
+  workers: 20
+  protocol: "mixed"  # SYN, ACK, UDP mixed
+  pattern: "burst"
+  pps: 5000  # 5000 packets/second per worker
+  additional_args:
+    no-adaptation: false
+
+# Attack phases (seconds)
+phases:
+  ramp_up: 40
+  ramp_down: 40

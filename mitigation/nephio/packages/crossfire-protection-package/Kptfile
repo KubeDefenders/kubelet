@@ -1,0 +1,32 @@
+apiVersion: kpt.dev/v1
+kind: Kptfile
+metadata:
+  name: crossfire-protection-package
+  annotations:
+    config.kubernetes.io/local-config: "true"
+info:
+  description: |
+    Nephio package for comprehensive Crossfire DDoS attack protection.
+    Includes network policies, autoscaling, rate limiting, and Nephio-exclusive features.
+    
+    This package replicates Kubernetes native mitigations and extends them with:
+    - Intent-based capacity management
+    - Multi-cluster attack response coordination
+    - Automated network function chaining
+    - Dynamic traffic steering based on attack patterns
+    - Cross-cluster load distribution
+pipeline:
+  mutators:
+    # Inject cluster-specific capacity
+    - image: gcr.io/kpt-fn/set-annotations:v0.1.4
+      configMap:
+        nephio.org/deployment-target: edge-cluster
+        nephio.org/protection-level: high
+    # Apply namespace transformations
+    - image: gcr.io/kpt-fn/apply-replacements:v0.1.1
+      configPath: package-context.yaml
+  validators:
+    # Validate resource quotas don't exceed cluster capacity
+    - image: gcr.io/kpt-fn/kubeval:v0.3.0
+    # Ensure network policies don't block critical traffic
+    - image: nephio.org/validators/network-policy-validator:v1

@@ -1,0 +1,211 @@
+---
+# Fault Injection for Chaos Engineering: Test resilience during attacks
+# Delay injection to simulate network congestion during DDoS
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: catalogue-delay-injection
+  namespace: sock-shop
+  annotations:
+    description: "Simulate network congestion during Crossfire attacks"
+spec:
+  hosts:
+  - catalogue.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - headers:
+        x-chaos-test:
+          exact: "delay"
+    fault:
+      delay:
+        percentage:
+          value: 20.0               # Inject delays in 20% of requests
+        fixedDelay: 5s              # 5-second delay
+    route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+        port:
+          number: 80
+  - route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+        port:
+          number: 80
+---
+# Abort injection to simulate service failures during DDoS
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: cart-abort-injection
+  namespace: sock-shop
+  annotations:
+    description: "Simulate cart service failures during attacks"
+spec:
+  hosts:
+  - carts.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - headers:
+        x-chaos-test:
+          exact: "abort"
+    fault:
+      abort:
+        percentage:
+          value: 10.0               # Fail 10% of requests
+        httpStatus: 503             # Service Unavailable
+    route:
+    - destination:
+        host: carts.sock-shop.svc.cluster.local
+        port:
+          number: 80
+  - route:
+    - destination:
+        host: carts.sock-shop.svc.cluster.local
+        port:
+          number: 80
+---
+# Combined delay + abort for comprehensive testing
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: user-combined-faults
+  namespace: sock-shop
+  annotations:
+    description: "Test user service under both delay and failure conditions"
+spec:
+  hosts:
+  - user.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - headers:
+        x-chaos-test:
+          exact: "combined"
+    fault:
+      delay:
+        percentage:
+          value: 30.0
+        fixedDelay: 3s
+      abort:
+        percentage:
+          value: 5.0
+        httpStatus: 500
+    route:
+    - destination:
+        host: user.sock-shop.svc.cluster.local
+        port:
+          number: 80
+  - route:
+    - destination:
+        host: user.sock-shop.svc.cluster.local
+        port:
+          number: 80
+---
+# Test critical service resilience: Payment service
+# Low fault injection percentage to avoid breaking transactions
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: payment-fault-tolerance-test
+  namespace: sock-shop
+  annotations:
+    description: "Validate payment service handles failures gracefully"
+spec:
+  hosts:
+  - payment.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - headers:
+        x-chaos-test:
+          exact: "payment-chaos"
+    fault:
+      delay:
+        percentage:
+          value: 5.0                # Very low percentage
+        fixedDelay: 2s
+      abort:
+        percentage:
+          value: 2.0
+        httpStatus: 503
+    route:
+    - destination:
+        host: payment.sock-shop.svc.cluster.local
+        port:
+          number: 80
+    timeout: 30s
+    retries:
+      attempts: 2                   # Retry on failure
+      perTryTimeout: 10s
+      retryOn: 5xx,reset,connect-failure
+  - route:
+    - destination:
+        host: payment.sock-shop.svc.cluster.local
+        port:
+          number: 80
+---
+# Crossfire-specific chaos: Inject faults into decoy services
+# Verify critical services remain unaffected
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: crossfire-decoy-chaos
+  namespace: sock-shop
+  annotations:
+    description: "Simulate Crossfire attack conditions on decoy services"
+spec:
+  hosts:
+  - catalogue.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - sourceLabels:
+        chaos-simulation: "crossfire"
+    fault:
+      delay:
+        percentage:
+          value: 80.0               # Heavy delays
+        fixedDelay: 10s
+      abort:
+        percentage:
+          value: 30.0               # High failure rate
+        httpStatus: 503
+    route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+        port:
+          number: 80
+  - route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+        port:
+          number: 80
+---
+# Database fault injection for testing connection resilience
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: orders-db-chaos
+  namespace: sock-shop
+  annotations:
+    description: "Test orders service resilience to database failures"
+spec:
+  hosts:
+  - orders-db.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - headers:
+        x-chaos-test:
+          exact: "db-chaos"
+    fault:
+      abort:
+        percentage:
+          value: 1.0                # 1% database failures
+        httpStatus: 503
+    route:
+    - destination:
+        host: orders-db.sock-shop.svc.cluster.local
+        port:
+          number: 27017
+  - route:
+    - destination:
+        host orders-db.sock-shop.svc.cluster.local
+        port:
+          number: 27017

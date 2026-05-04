@@ -1,0 +1,99 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crossfire-controller
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app: crossfire-controller
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+spec:
+  replicas: 1
+  # Controller is a singleton: multiple replicas would cause duplicate reconciliation.
+  # For HA, use leader election (extend with coordination.k8s.io/v1 Lease).
+  selector:
+    matchLabels:
+      app: crossfire-controller
+  template:
+    metadata:
+      labels:
+        app: crossfire-controller
+        app.kubernetes.io/component: controller
+        app.kubernetes.io/part-of: crossfire-nephio-refactor
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: crossfire-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: controller
+        image: crossfire-controller:latest  # kpt-set: ${controller-image}
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-u", "controller.py"]
+        ports:
+        - name: metrics
+          containerPort: 8082
+          protocol: TCP
+        env:
+        - name: KUBERNETES_API_URL
+          value: "https://kubernetes.default.svc"
+        - name: ACTIVE_REQUEUE_SECONDS
+          value: "30"  # kpt-set: ${active-requeue-seconds}
+        - name: COMPLETED_RETAIN_SECONDS
+          value: "300"  # kpt-set: ${completed-retain-seconds}
+        - name: METRICS_PORT
+          value: "8082"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 300m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crossfire-controller
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app: crossfire-controller
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+spec:
+  selector:
+    app: crossfire-controller
+  ports:
+  - name: metrics
+    port: 8082
+    targetPort: metrics

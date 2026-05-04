@@ -1,0 +1,30 @@
+component: detection
+version: 1.0.0
+description: ML-based DDoS detection with monitoring infrastructure
+
+provides:
+  ml_detection:
+    models:
+      - path: models/ensemble.pkl
+        type: isolation-forest
+        training_data: CICDDoS2019
+    cli_tools:
+      - cli_monitor.py
+      - continuous_monitor.py
+      - train_detector.py
+  
+  monitoring:
+    prometheus_config: monitoring/prometheus-rules.yaml
+    grafana_dashboards: monitoring/grafana-dashboards.yaml
+    servicemonitors: monitoring/servicemonitors.yaml
+
+requires:
+  - prometheus_url: "Any Prometheus endpoint with Istio metrics"
+
+optional:
+  - training_dataset: "CICDDoS2019 for model retraining"
+
+dependencies:
+  python: ">=3.10"
+  packages: "See requirements.txt"
+  prometheus: ">=2.40"

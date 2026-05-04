@@ -1,0 +1,167 @@
+---
+# Anti-Crossfire: Isolate decoy services from critical path
+# Prevent catalogue/cart flooding from affecting payment/orders
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: anti-crossfire-decoy-isolation
+  namespace: sock-shop
+  annotations:
+    description: "Isolate frequently-attacked decoy services to prevent crossfire"
+spec:
+  podSelector:
+    matchLabels:
+      decoy-service: "true"  # Label catalogue, cart, user as decoys
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Only allow from front-end, limited connections
+  - from:
+    - podSelector:
+        matchLabels:
+          app: front-end
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  # Only allow to own database, no cross-service
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values: ["catalogue-db", "cart-db", "user-db"]
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - podSelector:
+        matchLabels:
+          app: carts-db
+    ports:
+    - protocol: TCP
+      port: 27017
+---
+# Critical path protection: Orders and Payment isolation
+# These services should be isolated from decoy service traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: anti-crossfire-critical-isolation
+  namespace: sock-shop
+  annotations:
+    description: "Protect critical services from crossfire attacks"
+spec:
+  podSelector:
+    matchLabels:
+      critical-service: "true"  # Label orders, payment, shipping
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Only from front-end and orders service
+  - from:
+    - podSelector:
+        matchLabels:
+          app: front-end
+    - podSelector:
+        matchLabels:
+          app: orders
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  # Limited egress to databases only
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values: ["orders-db", "shipping", "payment"]
+    ports:
+    - protocol: TCP
+      port: 80
+---
+# Rate limit ingress at network level (best effort)
+# Use connection tracking via iptables (requires CNI support)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: connection-rate-limit
+  namespace: sock-shop
+  annotations:
+    description: "Limit connections per source (CNI-dependent)"
+    # Note: This is best-effort and depends on CNI plugin support
+    # Calico, Cilium support connection tracking
+spec:
+  podSelector:
+    matchLabels:
+      app: front-end
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 8079
+---
+# Egress control to prevent amplification attacks
+# Block suspicious external IPs and rate-limit DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: anti-amplification-egress
+  namespace: sock-shop
+  annotations:
+    description: "Prevent pods from launching amplification attacks"
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  # Allow only specific external services
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS only
+  # Block common amplification ports
+  # Note: NetworkPolicy doesn't support EXCEPT, so we allowlist instead
+  # Blocked implicitly: UDP 123 (NTP), UDP 53 (DNS amplification),
+  #                     UDP 161 (SNMP), UDP 389 (LDAP)
+---
+# Pod-to-pod rate limiting via ipBlock (if external traffic)
+# This helps with external Crossfire attacks targeting specific pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-source-control
+  namespace: sock-shop
+  annotations:
+    description: "Control external traffic sources to prevent attacks"
+spec:
+  podSelector:
+    matchLabels:
+      app: front-end
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow from specific IP ranges only (adjust for your network)
+  - from:
+    - ipBlock:
+        cidr: 10.0.0.0/8  # Internal network
+    - ipBlock:
+        cidr: 192.168.0.0/16  # Internal network
+    # Block known bad actor ranges
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 185.220.101.0/24  # Example: Tor exit nodes
+        - 198.144.120.0/22  # Example: Known attack source
+    ports:
+    - protocol: TCP
+      port: 8079

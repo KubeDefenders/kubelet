@@ -1,0 +1,57 @@
+---
+# RBAC for CrossfireDetector
+# Required permissions:
+#   - Read nodes (for taint state verification)
+#   - Create/patch CrossfireDetectionEvents (CRD)
+#   - Read pods (for pod IP lookup via kube-state-metrics backup)
+# The detector does NOT need write access to any workload resources.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crossfire-detector
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app.kubernetes.io/component: detector
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crossfire-detector
+  labels:
+    app.kubernetes.io/component: detector
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+rules:
+  # Read node information (for NIC capacity annotations)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+
+  # Create and manage CrossfireDetectionEvent CRs
+  - apiGroups: ["crossfire.io"]
+    resources: ["crossfiredetectionevents"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  - apiGroups: ["crossfire.io"]
+    resources: ["crossfiredetectionevents/status"]
+    verbs: ["get", "patch", "update"]
+
+  # Read pods (fallback if kube-state-metrics is unavailable)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crossfire-detector
+  labels:
+    app.kubernetes.io/component: detector
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crossfire-detector
+subjects:
+  - kind: ServiceAccount
+    name: crossfire-detector
+    namespace: crossfire-system  # kpt-set: ${system-namespace}

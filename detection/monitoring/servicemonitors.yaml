@@ -1,0 +1,30 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sock-shop-monitor
+  namespace: sock-shop
+  labels:
+    app: sock-shop
+spec:
+  selector:
+    matchLabels:
+      app: front-end
+  endpoints:
+  - port: http
+    interval: 15s
+    path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: istio-system-monitor
+  namespace: istio-system
+  labels:
+    release: istio
+spec:
+  selector:
+    matchLabels:
+      istio: pilot
+  endpoints:
+  - port: http-monitoring
+    interval: 15s

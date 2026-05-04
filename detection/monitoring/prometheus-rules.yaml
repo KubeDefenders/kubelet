@@ -1,0 +1,70 @@
+# Prometheus scraping configuration for DDoS metrics
+
+# Custom recording rules for attack detection
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: istio-system
+data:
+  ddos-rules.yml: |
+    groups:
+    - name: ddos_detection
+      interval: 10s
+      rules:
+      # High request rate detection
+      - record: ddos:request_rate:1m
+        expr: sum(rate(istio_requests_total{destination_service_namespace="sock-shop"}[1m])) by (destination_service_name)
+      
+      # Error spike detection
+      - record: ddos:error_rate:1m
+        expr: sum(rate(istio_requests_total{destination_service_namespace="sock-shop",response_code=~"5.."}[1m])) by (destination_service_name)
+      
+      # Connection exhaustion detection
+      - record: ddos:connection_overflow:current
+        expr: sum(envoy_cluster_circuit_breakers_default_rq_overflow{namespace="sock-shop"}) by (cluster_name)
+      
+      # Network bandwidth usage
+      - record: ddos:network_bytes:1m
+        expr: sum(rate(istio_tcp_sent_bytes_total{destination_service_namespace="sock-shop"}[1m]) + rate(istio_tcp_received_bytes_total{destination_service_namespace="sock-shop"}[1m]))
+      
+      # Latency degradation
+      - record: ddos:response_time_p95:1m
+        expr: histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_service_namespace="sock-shop"}[1m])) by (destination_service_name, le))
+      
+      # Alert rules
+      - alert: HighRequestRate
+        expr: ddos:request_rate:1m > 1000
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High request rate detected on {{ $labels.destination_service_name }}"
+          description: "Request rate is {{ $value }} req/s"
+      
+      - alert: HighErrorRate
+        expr: ddos:error_rate:1m > 10
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on {{ $labels.destination_service_name }}"
+          description: "Error rate is {{ $value }} errors/s"
+      
+      - alert: CircuitBreakerTripped
+        expr: ddos:connection_overflow:current > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit breaker tripped on {{ $labels.cluster_name }}"
+          description: "Connection overflow detected"
+      
+      - alert: HighLatency
+        expr: ddos:response_time_p95:1m > 5000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency on {{ $labels.destination_service_name }}"
+          description: "P95 latency is {{ $value }}ms"

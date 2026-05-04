@@ -1,0 +1,113 @@
+# Target Adapter Configuration for Sock Shop
+# Defines endpoints, weights, and resource costs for crossfire attacks
+
+target_name: "sock-shop"
+target_service: "front-end"
+base_url: "http://front-end:8080"
+
+# Endpoint definitions
+endpoints:
+  # Target endpoint (protect this)
+  - path: "/catalogue"
+    method: "GET"
+    weight: 0.0  # NEVER attack directly
+    resource_cost: 5
+    auth_required: false
+    category: "target"
+  
+  # Decoy endpoints (flood these)
+  - path: "/login"
+    method: "GET"
+    weight: 2.0
+    resource_cost: 3
+    auth_required: false
+    category: "decoy"
+  
+  - path: "/register"
+    method: "GET"
+    weight: 2.0
+    resource_cost: 3
+    auth_required: false
+    category: "decoy"
+  
+  - path: "/basket"
+    method: "GET"
+    weight: 3.0
+    resource_cost: 4
+    auth_required: true
+    category: "decoy"
+  
+  - path: "/orders"
+    method: "GET"
+    weight: 3.0
+    resource_cost: 5
+    auth_required: true
+    category: "decoy"
+  
+  - path: "/address"
+    method: "GET"
+    weight: 2.0
+    resource_cost: 3
+    auth_required: true
+    category: "decoy"
+  
+  - path: "/card"
+    method: "GET"
+    weight: 2.0
+    resource_cost: 3
+    auth_required: true
+    category: "decoy"
+  
+  - path: "/customer"
+    method: "GET"
+    weight: 1.5
+    resource_cost: 3
+    auth_required: true
+    category: "decoy"
+  
+  - path: "/"
+    method: "GET"
+    weight: 1.0
+    resource_cost: 2
+    auth_required: false
+    category: "decoy"
+  
+  - path: "/category.html"
+    method: "GET"
+    weight: 1.0
+    resource_cost: 2
+    auth_required: false
+    category: "decoy"
+
+# Service topology (for network-level attacks)
+services:
+  - name: "front-end"
+    ip: "10.0.0.10"
+    ports: [8080]
+  
+  - name: "catalogue"
+    ip: "10.0.0.11"
+    ports: [80]
+  
+  - name: "user"
+    ip: "10.0.0.12"
+    ports: [80]
+  
+  - name: "orders"
+    ip: "10.0.0.13"
+    ports: [80]
+  
+  - name: "payment"
+    ip: "10.0.0.14"
+    ports: [80]
+  
+  - name: "shipping"
+    ip: "10.0.0.15"
+    ports: [80]
+
+# Attack recommendations
+recommendations:
+  min_decoy_endpoints: 5
+  recommended_profile: "moderate"
+  stealth_profile: "stealth"
+  stress_test_profile: "aggressive"

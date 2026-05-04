@@ -1,0 +1,170 @@
+---
+# Nephio-managed Rate Limiting for Crossfire Protection
+# Integrates with Istio/Envoy for advanced rate limiting
+apiVersion: workload.nephio.org/v1alpha1
+kind: RateLimiting
+metadata:
+  name: global-rate-limit-config
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/package: crossfire-protection
+  annotations:
+    nephio.org/description: "Global rate limiting configuration"
+spec:
+  # Nephio intent-based rate limiting
+  intent:
+    protectionLevel: high
+    defaultRateLimit: 500 # kpt-set: ${rate-limit-threshold}
+    burstMultiplier: 2
+  
+  # Rate limit configurations by service
+  services:
+  - name: front-end
+    rateLimit:
+      requestsPerSecond: 500
+      burstSize: 1000
+      connectionLimit: 100 # kpt-set: ${connection-limit}
+    enforcement: soft  # Log violations but don't block initially
+  
+  - name: catalogue
+    rateLimit:
+      requestsPerSecond: 300
+      burstSize: 600
+      connectionLimit: 150
+    enforcement: hard
+  
+  - name: cart
+    rateLimit:
+      requestsPerSecond: 200
+      burstSize: 400
+      connectionLimit: 100
+    enforcement: hard
+  
+  - name: orders
+    rateLimit:
+      requestsPerSecond: 100
+      burstSize: 200
+      connectionLimit: 50
+    enforcement: hard
+  
+  - name: payment
+    rateLimit:
+      requestsPerSecond: 50
+      burstSize: 100
+      connectionLimit: 25
+    enforcement: hard
+  
+  # Per-source rate limiting
+  perSource:
+    enabled: true
+    requestsPerSecond: 50
+    burstSize: 100
+    windowSize: 10s
+---
+# Nephio-exclusive: Adaptive rate limiting based on traffic patterns
+apiVersion: workload.nephio.org/v1alpha1
+kind: AdaptiveRateLimiting
+metadata:
+  name: ml-adaptive-rate-limiting
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "ML-based adaptive rate limiting"
+spec:
+  # Use ML detector to identify legitimate vs attack traffic
+  trafficAnalysis:
+    enabled: true
+    mlEndpoint: http://ml-detector.sock-shop.svc.cluster.local:5000
+    updateInterval: 30s
+  
+  # Baseline learning
+  baseline:
+    learningPeriod: 1h
+    updateInterval: 5m
+    metrics:
+    - requestsPerSecond
+    - connectionRate
+    - errorRate
+    - latency
+  
+  # Adaptive rules
+  adaptiveRules:
+  - condition:
+      anomalyScore: ">0.8"
+      errorRate: ">5%"
+    action:
+      type: aggressive-rate-limit
+      multiplier: 0.5  # Cut rate limit in half
+      duration: 300s
+  
+  - condition:
+      anomalyScore: ">0.9"
+      errorRate: ">10%"
+    action:
+      type: block
+      multiplier: 0.1  # Allow only 10%
+      duration: 600s
+  
+  - condition:
+      anomalyScore: "<0.3"
+      errorRate: "<1%"
+    action:
+      type: relax-rate-limit
+      multiplier: 1.5  # Increase rate limit 50%
+      duration: 300s
+  
+  # Whitelist legitimate sources
+  whitelist:
+    enabled: true
+    sources:
+    - type: cidr
+      value: "10.0.0.0/8"  # Internal network
+    - type: header
+      header: X-Verified-Client
+      value: "true"
+---
+# Nephio-exclusive: Distributed rate limiting coordination
+apiVersion: workload.nephio.org/v1alpha1
+kind: DistributedRateLimiting
+metadata:
+  name: multi-cluster-rate-limiting
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Coordinate rate limits across multiple clusters"
+spec:
+  # Global rate limit shared across clusters
+  globalRateLimit:
+    requestsPerSecond: 10000
+    distribution: proportional
+  
+  # Cluster-specific limits
+  clusters:
+  - name: edge-cluster-01
+    allocation: 4000  # 40% of global
+    spillover:
+      enabled: true
+      maxSpillover: 2000
+      spilloverTarget: core-cluster-01
+  
+  - name: edge-cluster-02
+    allocation: 3000  # 30% of global
+    spillover:
+      enabled: true
+      maxSpillover: 1500
+      spilloverTarget: core-cluster-01
+  
+  - name: core-cluster-01
+    allocation: 3000  # 30% of global + spillover
+    spillover:
+      enabled: false
+  
+  # Token bucket synchronization
+  synchronization:
+    protocol: redis
+    endpoint: redis://rate-limit-sync.nephio-system.svc:6379
+    updateInterval: 1s
+    consistencyModel: eventual

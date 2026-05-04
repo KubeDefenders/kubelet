@@ -1,0 +1,149 @@
+# Configuration for ML-Optimized DDoS Detector
+
+# Prometheus connection
+prometheus:
+  url: "http://localhost:9090"
+  query_timeout: 10  # seconds
+  scrape_interval: 15  # seconds between metric collections
+
+# Feature extraction
+features:
+  # Time windows for aggregation (seconds)
+  windows: [10, 30, 60]
+  
+  # Statistical aggregations
+  aggregations:
+    - mean
+    - std
+    - min
+    - max
+    - p50
+    - p95
+    - p99
+  
+  # Core feature groups to extract
+  groups:
+    - rate_features      # Request/packet rates
+    - latency_features   # Response time distributions
+    - size_features      # Request/response sizes
+    - error_features     # Error rates and patterns
+    - flow_features      # Connection and flow characteristics
+
+# Model configuration
+model:
+  # Ensemble weights (must sum to 1.0)
+  ensemble:
+    isolation_forest: 0.6
+    one_class_svm: 0.4
+  
+  # Isolation Forest parameters
+  isolation_forest:
+    n_estimators: 150
+    max_samples: 256
+    contamination: 0.05  # Expected anomaly rate in production
+    random_state: 42
+    n_jobs: -1
+  
+  # One-Class SVM parameters
+  one_class_svm:
+    kernel: 'rbf'
+    gamma: 'scale'
+    nu: 0.05  # Upper bound on fraction of outliers
+  
+  # Feature preprocessing
+  preprocessing:
+    scaler: 'robust'  # robust, standard, or minmax
+    handle_missing: 'median'  # median, mean, or zero
+    clip_outliers: true
+    outlier_percentile: 99
+
+# Detection thresholds
+detection:
+  # Anomaly score threshold (-1 = anomalous, +1 = normal)
+  # Lower = more sensitive (more false positives)
+  # Higher = less sensitive (may miss attacks)
+  anomaly_threshold: -0.3
+  
+  # Confidence threshold (0-1)
+  min_confidence: 0.7
+  
+  # Alert settings
+  alert_cooldown: 60  # seconds between alerts
+  min_consecutive_detections: 2  # detections before alerting
+  
+  # Severity classification
+  severity_thresholds:
+    critical: -0.7  # Anomaly score for critical alerts
+    high: -0.5
+    medium: -0.3
+    low: -0.1
+
+# Explainable AI (xAI)
+xai:
+  # SHAP configuration
+  shap:
+    background_samples: 100  # Samples for SHAP background
+    max_display_features: 10  # Top features to show
+    tree_path_dependent: true  # Use tree path for IF
+  
+  # Explanation generation
+  explanation:
+    include_feature_values: true
+    include_baselines: true
+    generate_plots: false  # CLI mode - no plots
+    min_contribution_threshold: 0.01  # Min SHAP value to display
+
+# Training configuration
+training:
+  # CICDDoS2019 dataset settings
+  dataset:
+    normal_only: true  # Train only on normal traffic
+    sample_size: 50000  # Max samples to use
+    validation_split: 0.2
+    random_state: 42
+  
+  # Feature selection
+  feature_selection:
+    enabled: true
+    method: 'variance'  # variance, mutual_info, or correlation
+    min_variance: 0.01
+    max_correlation: 0.95  # Remove highly correlated features
+  
+  # Model persistence
+  output:
+    model_path: 'models/ensemble_detector.pkl'
+    scaler_path: 'models/feature_scaler.pkl'
+    feature_names_path: 'models/feature_names.json'
+    training_stats_path: 'models/training_stats.json'
+
+# Monitoring and logging
+monitoring:
+  # Metric history for baseline computation
+  history_window: 3600  # seconds (1 hour)
+  history_samples: 240  # Keep last 240 samples
+  
+  # Logging
+  log_level: 'INFO'  # DEBUG, INFO, WARNING, ERROR
+  log_file: 'logs/detector.log'
+  log_rotation: '100 MB'
+  
+  # Performance tracking
+  track_latency: true
+  track_predictions: true
+  save_anomalies: true
+  anomaly_log_path: 'logs/anomalies.jsonl'
+
+# Advanced options
+advanced:
+  # Feature engineering
+  create_ratio_features: true
+  create_delta_features: true  # Compare to previous window
+  create_rolling_features: true
+  
+  # Adaptive thresholding
+  adaptive_threshold: false  # Adjust threshold based on FP rate
+  adaptive_window: 86400  # seconds (24 hours)
+  
+  # Multi-service detection
+  per_service_models: false  # Train separate models per service
+  service_aggregation: 'cluster'  # cluster or individual

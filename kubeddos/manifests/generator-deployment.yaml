@@ -1,0 +1,102 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crossfire-intent-generator
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app: crossfire-intent-generator
+    app.kubernetes.io/component: intent-generator
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crossfire-intent-generator
+  template:
+    metadata:
+      labels:
+        app: crossfire-intent-generator
+        app.kubernetes.io/component: intent-generator
+        app.kubernetes.io/part-of: crossfire-nephio-refactor
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: crossfire-intent-generator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: intent-generator
+        image: crossfire-intent-generator:latest  # kpt-set: ${intent-generator-image}
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-u", "intent_generator.py"]
+        ports:
+        - name: metrics
+          containerPort: 8081
+          protocol: TCP
+        env:
+        - name: KUBERNETES_API_URL
+          value: "https://kubernetes.default.svc"
+        - name: HIGH_CONFIDENCE_THRESHOLD
+          value: "0.85"  # kpt-set: ${high-confidence-threshold}
+        - name: INTENT_TTL_SECONDS
+          value: "300"  # kpt-set: ${intent-ttl-seconds}
+        - name: DECOY_EGRESS_LIMIT_MBPS
+          value: "100"  # kpt-set: ${decoy-egress-limit-mbps}
+        - name: DECOY_INGRESS_LIMIT_MBPS
+          value: "100"  # kpt-set: ${decoy-ingress-limit-mbps}
+        - name: VICTIM_PRIORITY_VALUE
+          value: "1000000"  # kpt-set: ${victim-priority-value}
+        - name: METRICS_PORT
+          value: "8081"
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crossfire-intent-generator
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app: crossfire-intent-generator
+    app.kubernetes.io/component: intent-generator
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+spec:
+  selector:
+    app: crossfire-intent-generator
+  ports:
+  - name: metrics
+    port: 8081
+    targetPort: metrics

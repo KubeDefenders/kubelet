@@ -1,0 +1,38 @@
+component: attacks
+version: 1.0.0
+description: DDoS attack simulation tools (Crossfire, HTTP flood, etc.)
+
+provides:
+  attack_types:
+    - crossfire-app-level
+    - crossfire-network-level
+    - http-flood
+    - slowloris
+    - dns-amplification
+  
+  cli_interface:
+    - script: crossfire-app-level.py
+      required_args:
+        - --target-url
+      optional_args:
+        - --duration
+        - --workers
+        - --rate
+    - script: crossfire-network-level.py
+      required_args:
+        - --target-url
+    - script: attack.py
+      required_args:
+        - --target-url
+        - --attack-type
+
+requires:
+  - target_url: "Any HTTP endpoint (can be any web application, not just project target)"
+  
+optional:
+  - discovered_endpoints: "For sophisticated endpoint-aware attacks"
+  - mitigation_path: "For testing mitigations (test-crossfire-mitigations.py)"
+
+dependencies:
+  python: ">=3.10"
+  packages: "See requirements.txt"

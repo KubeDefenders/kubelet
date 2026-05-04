@@ -1,0 +1,218 @@
+/* KubeDDoS Dashboard — Custom Styles */
+
+/* ── Pipeline Flow ─────────────────────────────────────────────── */
+.pipeline-flow {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    overflow-x: auto;
+    padding: 1rem 0;
+}
+
+.pipeline-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.5rem;
+    background: var(--bs-dark);
+    min-width: 120px;
+    text-align: center;
+    transition: border-color 0.3s ease;
+}
+
+.pipeline-step:hover {
+    border-color: var(--bs-info);
+}
+
+.pipeline-step .step-icon {
+    font-size: 1.5rem;
+}
+
+.pipeline-step .step-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.pipeline-step .step-sub {
+    font-size: 0.7rem;
+    color: var(--bs-gray-500);
+}
+
+.pipeline-arrow {
+    font-size: 1.2rem;
+    color: var(--bs-gray-500);
+    flex-shrink: 0;
+}
+
+/* ── Status Cards ──────────────────────────────────────────────── */
+.status-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.status-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.status-card .display-6 {
+    font-weight: 700;
+}
+
+/* ── Invariant Progress Bars ───────────────────────────────────── */
+.invariant-bar {
+    height: 20px;
+    border-radius: 4px;
+    position: relative;
+    overflow: visible;
+}
+
+.invariant-bar .threshold-marker {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    width: 2px;
+    background: var(--bs-warning);
+    z-index: 2;
+}
+
+.invariant-bar .threshold-label {
+    position: absolute;
+    top: -18px;
+    font-size: 0.65rem;
+    color: var(--bs-warning);
+    white-space: nowrap;
+    transform: translateX(-50%);
+}
+
+/* ── Health Badge ──────────────────────────────────────────────── */
+#health-badge {
+    font-size: 0.7rem;
+    vertical-align: middle;
+}
+
+#health-badge.bg-success {
+    animation: none;
+}
+
+#health-badge.bg-danger {
+    animation: pulse-danger 1.5s infinite;
+}
+
+@keyframes pulse-danger {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ── Table Tweaks ──────────────────────────────────────────────── */
+.table-dark th {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    color: var(--bs-gray-400);
+}
+
+.table-dark td {
+    vertical-align: middle;
+    font-size: 0.85rem;
+}
+
+.table-dark .badge {
+    font-weight: 500;
+}
+
+/* clickable rows */
+tr[data-event-name],
+tr[data-intent-name] {
+    cursor: pointer;
+}
+
+tr[data-event-name]:hover,
+tr[data-intent-name]:hover {
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* ── Strategy Cards ────────────────────────────────────────────── */
+.strategy-card {
+    transition: transform 0.15s ease;
+}
+
+.strategy-card:hover {
+    transform: scale(1.02);
+}
+
+/* ── Severity badges ───────────────────────────────────────────── */
+.severity-CRITICAL { color: #ff4444; font-weight: 700; }
+.severity-HIGH     { color: #ff8800; font-weight: 600; }
+.severity-MEDIUM   { color: #ffcc00; }
+.severity-LOW      { color: #44bb44; }
+
+/* ── Phase badges ──────────────────────────────────────────────── */
+.phase-Pending    { background-color: #6c757d !important; }
+.phase-Active     { background-color: #0d6efd !important; }
+.phase-Reverting  { background-color: #fd7e14 !important; }
+.phase-Completed  { background-color: #198754 !important; }
+.phase-Failed     { background-color: #dc3545 !important; }
+
+/* ── JSON viewer ───────────────────────────────────────────────── */
+.json-viewer {
+    max-height: 400px;
+    overflow-y: auto;
+    font-size: 0.8rem;
+    background: #1a1a2e;
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+/* ── Toast container ───────────────────────────────────────────── */
+.toast-container {
+    z-index: 1090;
+}
+
+/* ── Card inner glow for status ────────────────────────────────── */
+.glow-success { box-shadow: 0 0 10px rgba(25, 135, 84, 0.3); }
+.glow-danger  { box-shadow: 0 0 10px rgba(220, 53, 69, 0.3); }
+.glow-warning { box-shadow: 0 0 10px rgba(255, 193, 7, 0.3); }
+.glow-info    { box-shadow: 0 0 10px rgba(13, 202, 240, 0.3); }
+
+/* ── Scrollbar (dark theme) ────────────────────────────────────── */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1a1a2e;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .pipeline-flow {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .pipeline-arrow {
+        display: none;
+    }
+
+    .pipeline-step {
+        min-width: 100px;
+    }
+
+    .status-card .display-6 {
+        font-size: 1.5rem;
+    }
+}

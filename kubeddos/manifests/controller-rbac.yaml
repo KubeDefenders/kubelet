@@ -1,0 +1,106 @@
+---
+# RBAC for CrossfireMitigationController
+# The controller requires broader permissions because it must create and
+# modify Kubernetes resources on behalf of intents. These permissions are
+# intentionally minimal: only the resource types required by the three
+# mitigation strategies.
+#
+# Principle of least privilege:
+#   - Does NOT get cluster-admin.
+#   - Does NOT access Secrets.
+#   - Only patches Deployments, Pods, Nodes, PriorityClasses, HPAs.
+#   - All resource modifications are tracked in status.appliedResources
+#     for full auditability.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crossfire-controller
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crossfire-controller
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+rules:
+  # CrossfireMitigationIntent CRD — primary watch target
+  - apiGroups: ["crossfire.io"]
+    resources: ["crossfiremitigationintents"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["crossfire.io"]
+    resources: ["crossfiremitigationintents/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["crossfire.io"]
+    resources: ["crossfiremitigationintents/finalizers"]
+    verbs: ["update"]
+
+  # PriorityClass (PriorityElevation strategy)
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    verbs: ["get", "list", "create", "delete"]
+
+  # Deployments (PriorityElevation, TopologyEviction, DecoyReduction strategies)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch", "update"]
+
+  # ReplicaSets (DecoyReduction — owner reference lookup to find Deployments)
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list"]
+
+  # DaemonSets (DecoyReduction — delete decoy DaemonSets, recreate on revert)
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "create", "delete"]
+
+  # Pods (BandwidthConstraint strategy — annotation patching)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "patch"]
+
+  # Nodes (TopologyEviction strategy — taint management)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "patch"]
+
+  # HPAs (optional scaleUpVictimMinReplicas in TopologyEviction strategy)
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "patch"]
+
+  # NetworkPolicies (NetworkIsolation strategy — block attack→victim traffic)
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "delete"]
+
+  # ResourceQuotas (ResourceQuota strategy — starve attack namespace)
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["get", "list", "create", "delete"]
+
+  # Events — for emitting Kubernetes events about reconciliation
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crossfire-controller
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crossfire-controller
+subjects:
+  - kind: ServiceAccount
+    name: crossfire-controller
+    namespace: crossfire-system  # kpt-set: ${system-namespace}

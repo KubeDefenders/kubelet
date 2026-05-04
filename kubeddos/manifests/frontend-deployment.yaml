@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeddos-frontend
+  labels:
+    app: kubeddos-frontend
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeddos-frontend
+  template:
+    metadata:
+      labels:
+        app: kubeddos-frontend
+        component: frontend
+    spec:
+      serviceAccountName: kubeddos-frontend
+      containers:
+        - name: frontend
+          image: kubeddos-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+              name: http
+              protocol: TCP
+          env:
+            - name: KUBERNETES_SERVICE_HOST
+              value: ""  # auto-detected in-cluster
+            - name: PROMETHEUS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: kubeddos-frontend-config
+                  key: prometheus-url
+            - name: TARGET_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: kubeddos-frontend-config
+                  key: target-namespace
+            - name: DETECTION_CRD_GROUP
+              value: "crossfire.io"
+            - name: DETECTION_CRD_VERSION
+              value: "v1alpha1"
+            - name: DETECTION_CRD_PLURAL
+              value: "crossfiredetectionevents"
+            - name: MITIGATION_CRD_GROUP
+              value: "crossfire.io"
+            - name: MITIGATION_CRD_VERSION
+              value: "v1alpha1"
+            - name: MITIGATION_CRD_PLURAL
+              value: "crossfiremitigationintents"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubeddos-frontend
+  labels:
+    app: kubeddos-frontend
+spec:
+  type: NodePort
+  ports:
+    - port: 5000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: kubeddos-frontend
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubeddos-frontend-config
+  labels:
+    app: kubeddos-frontend
+data:
+  prometheus-url: "http://prometheus-server.monitoring.svc.cluster.local:9090"
+  target-namespace: "default"

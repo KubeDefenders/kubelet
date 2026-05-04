@@ -1,0 +1,103 @@
+{
+  "base_url": "http://localhost:8080",
+  "discovery_time": "2026-01-01T20:38:43.041123",
+  "statistics": {
+    "requests_made": 36,
+    "successful_requests": 12,
+    "failed_requests": 24,
+    "discovery_time": 3.8090600967407227
+  },
+  "discovered_urls": [
+    "http://localhost:8080/healthcheck",
+    "http://localhost:8080",
+    "http://localhost:8080/health"
+  ],
+  "api_endpoints": [
+    "http://localhost:8080/healthcheck",
+    "http://localhost:8080/health"
+  ],
+  "static_resources": [],
+  "forms": [],
+  "endpoint_profiles": {
+    "http://localhost:8080/health": {
+      "url": "http://localhost:8080/health",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "status_codes": {
+        "GET": 200,
+        "HEAD": 200,
+        "OPTIONS": 200
+      },
+      "avg_response_time": 0.0012027422587076824,
+      "content_type": "application/octet-stream, text/plain",
+      "content_length": 3,
+      "requires_auth": false,
+      "resource_intensive": false
+    },
+    "http://localhost:8080/healthcheck": {
+      "url": "http://localhost:8080/healthcheck",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "status_codes": {
+        "GET": 200,
+        "HEAD": 200,
+        "OPTIONS": 200
+      },
+      "avg_response_time": 0.0014269351959228516,
+      "content_type": "application/octet-stream, text/plain",
+      "content_length": 3,
+      "requires_auth": false,
+      "resource_intensive": false
+    },
+    "http://localhost:8080": {
+      "url": "http://localhost:8080",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "status_codes": {
+        "GET": 200,
+        "HEAD": 200,
+        "OPTIONS": 405
+      },
+      "avg_response_time": 0.001314719518025716,
+      "content_type": "text/html",
+      "content_length": 612,
+      "requires_auth": false,
+      "resource_intensive": false
+    }
+  },
+  "categorized": {
+    "high_value_targets": [],
+    "api_endpoints": [],
+    "static_resources": [],
+    "forms": [],
+    "requires_auth": [],
+    "fast_endpoints": [
+      "http://localhost:8080/health",
+      "http://localhost:8080/healthcheck",
+      "http://localhost:8080"
+    ],
+    "slow_endpoints": []
+  },
+  "recommended_targets": {
+    "primary_targets": [],
+    "decoy_targets": [
+      "http://localhost:8080/health",
+      "http://localhost:8080/healthcheck",
+      "http://localhost:8080"
+    ],
+    "api_targets": [],
+    "all_targets": [
+      "http://localhost:8080/healthcheck",
+      "http://localhost:8080",
+      "http://localhost:8080/health"
+    ]
+  }
+}

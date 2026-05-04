@@ -1,0 +1,233 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: crossfiredetectionevents.crossfire.io
+  labels:
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+    app.kubernetes.io/managed-by: crossfire-controller
+  annotations:
+    # This CRD aligns with Nephio's event-sourcing pattern:
+    # conditions are observable, spec is immutable after creation.
+    crossfire.io/description: >
+      Emitted by the CrossfireDetector service when the four invariants of an
+      indirect crossfire attack are simultaneously satisfied on a cluster node.
+      Immutable once created; resolved via status.resolved = true.
+spec:
+  group: crossfire.io
+  scope: Cluster
+  names:
+    plural: crossfiredetectionevents
+    singular: crossfiredetectionevent
+    kind: CrossfireDetectionEvent
+    shortNames:
+    - cde
+    categories:
+    - crossfire
+    - networking
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.affectedNode
+    - name: Interface
+      type: string
+      jsonPath: .spec.congestedInterface
+    - name: LinkUtilPct
+      type: number
+      jsonPath: .spec.linkUtilizationPct
+    - name: Confidence
+      type: number
+      jsonPath: .spec.confidenceScore
+    - name: Resolved
+      type: boolean
+      jsonPath: .status.resolved
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            description: >
+              Immutable specification of the detected crossfire event.
+              Set once by the detector; never modified after creation.
+            required:
+            - detectedAt
+            - affectedNode
+            - congestedInterface
+            - linkUtilizationPct
+            - packetDropRate
+            - decoyPods
+            - victimPods
+            - victimErrorRatePct
+            - victimDirectTrafficPct
+            - confidenceScore
+            - detectionAlgorithm
+            properties:
+              detectedAt:
+                type: string
+                format: date-time
+                description: RFC3339 timestamp when detection was confirmed.
+
+              affectedNode:
+                type: string
+                description: Kubernetes node name on which congestion was observed.
+                minLength: 1
+
+              congestedInterface:
+                type: string
+                description: >
+                  Linux network interface on the node that is saturated
+                  (e.g., eth0, ens3, bond0).
+                minLength: 1
+
+              linkUtilizationPct:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 100.0
+                description: >
+                  Percentage of the interface's nominal capacity currently in use
+                  (receive + transmit combined), averaged over the detection window.
+
+              packetDropRate:
+                type: number
+                format: double
+                minimum: 0.0
+                description: >
+                  Interface packet drops per second at the time of detection,
+                  measured via node_network_receive_drop_total delta.
+
+              decoyPods:
+                type: array
+                description: >
+                  Pods on affectedNode identified as primary bandwidth consumers
+                  (the unwitting decoys of the crossfire attack).
+                minItems: 1
+                items:
+                  type: object
+                  required: [namespace, name, podIP, byteRateMbps]
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    podIP:
+                      type: string
+                    byteRateMbps:
+                      type: number
+                      format: double
+                      minimum: 0.0
+                      description: Observed ingress byte rate for this pod in Mbps.
+
+              victimPods:
+                type: array
+                description: >
+                  Pods on affectedNode that are experiencing degradation without
+                  proportional direct attack traffic (the actual crossfire victims).
+                minItems: 1
+                items:
+                  type: object
+                  required: [namespace, name, podIP]
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    podIP:
+                      type: string
+                    deploymentName:
+                      type: string
+                      description: >
+                        Owning Deployment name, used by the controller
+                        to apply topology and priority patches.
+
+              victimErrorRatePct:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 100.0
+                description: >
+                  Error rate of victim service(s) at detection time, expressed
+                  as a percentage of total requests.
+
+              victimDirectTrafficPct:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 100.0
+                description: >
+                  Percentage of total node NIC traffic that is directed at victim
+                  pods. A low value (< 10%) is the critical distinguishing
+                  invariant of indirect crossfire vs. direct attack.
+
+              confidenceScore:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 1.0
+                description: >
+                  Score [0,1] reflecting how strongly all four crossfire
+                  invariants are satisfied simultaneously.
+                  >= 0.7: probable crossfire; >= 0.9: high-confidence crossfire.
+
+              detectionAlgorithm:
+                type: string
+                description: >
+                  Identifier of the detection algorithm version used, for
+                  audit and reproducibility.
+                  Format: "crossfire-invariant-v1" or similar.
+
+              detectionWindowSeconds:
+                type: integer
+                minimum: 1
+                description: Length of the evaluation window used (seconds).
+
+          status:
+            type: object
+            description: Mutable status subresource; updated by the IntentGenerator.
+            properties:
+              resolved:
+                type: boolean
+                default: false
+                description: >
+                  True when the crossfire condition is no longer present.
+                  Set by the detector when link utilization drops below threshold.
+
+              resolvedAt:
+                type: string
+                format: date-time
+                description: RFC3339 timestamp when resolution was confirmed.
+
+              mitigationRef:
+                type: string
+                description: >
+                  Name of the CrossfireMitigationIntent created in response to
+                  this event. Empty if no intent was generated yet.
+
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required: [type, status]
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string

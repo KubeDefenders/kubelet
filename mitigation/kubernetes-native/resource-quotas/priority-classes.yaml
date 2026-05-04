@@ -1,0 +1,95 @@
+---
+# Critical priority class for essential services
+# These services get resources first during contention
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: critical-priority
+value: 1000000  # High priority
+globalDefault: false
+description: "Priority for critical services (payment, orders, shipping)"
+---
+# Normal priority for standard services
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: normal-priority
+value: 1000  # Medium priority
+globalDefault: true
+description: "Priority for normal services (front-end)"
+---
+# Decoy priority for flood-absorbing services
+# These can be evicted first to protect critical services
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: decoy-priority
+value: 100  # Low priority
+globalDefault: false
+description: "Priority for decoy services (catalogue, cart, user) - can be sacrificed"
+---
+# Example deployment with priority class
+# Apply this to payment, orders, shipping
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-with-priority
+  namespace: sock-shop
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment
+      critical-service: "true"
+  template:
+    metadata:
+      labels:
+        app: payment
+        critical-service: "true"
+    spec:
+      priorityClassName: critical-priority  # High priority
+      containers:
+      - name: payment
+        image: weaveworksdemos/payment:0.4.3
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1
+            memory: 2Gi
+        ports:
+        - containerPort: 80
+---
+# Example decoy service with low priority
+# Apply this to catalogue, cart, user
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalogue-with-priority
+  namespace: sock-shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalogue
+      decoy-service: "true"
+  template:
+    metadata:
+      labels:
+        app: catalogue
+        decoy-service: "true"
+    spec:
+      priorityClassName: decoy-priority  # Low priority
+      containers:
+      - name: catalogue
+        image: weaveworksdemos/catalogue:0.3.5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        ports:
+        - containerPort: 80

@@ -1,0 +1,427 @@
+"""
+KubeDDoS Attack Workflow — Frontend Application
+
+Flask + SocketIO application for managing and monitoring DDoS attack simulations.
+Provides endpoint discovery, strategy configuration, attack execution, and real-time
+metrics monitoring through a web interface.
+"""
+
+import json
+import os
+import subprocess
+import signal
+import sys
+import threading
+import time
+import yaml
+from datetime import datetime
+from pathlib import Path
+
+from flask import Flask, render_template, request, jsonify
+from flask_socketio import SocketIO
+
+# Add parent to path for config
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config import AttackConfig
+
+# ── App Init ───────────────────────────────────────────────────────
+config = AttackConfig()
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = config.secret_key
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+# ── State ──────────────────────────────────────────────────────────
+active_processes: dict = {}  # id -> {process, config, start_time, metrics}
+discovery_result: dict = {}  # Latest discovery result
+attack_history: list = []    # Completed attacks
+
+
+# ── Helpers ────────────────────────────────────────────────────────
+
+def load_strategies():
+    """Load all attack strategy YAML files."""
+    strategies = []
+    strategies_dir = Path(config.configs_dir) / "attack-strategies"
+    if strategies_dir.exists():
+        for f in sorted(strategies_dir.glob("*.yaml")):
+            try:
+                with open(f) as fh:
+                    data = yaml.safe_load(fh)
+                    data["_filename"] = f.name
+                    strategies.append(data)
+            except Exception as e:
+                strategies.append({"_filename": f.name, "_error": str(e)})
+    return strategies
+
+
+def load_target_adapters():
+    """Load all target adapter YAML files."""
+    adapters = []
+    adapters_dir = Path(config.configs_dir) / "target-adapters"
+    if adapters_dir.exists():
+        for f in sorted(adapters_dir.glob("*.yaml")):
+            try:
+                with open(f) as fh:
+                    data = yaml.safe_load(fh)
+                    data["_filename"] = f.name
+                    adapters.append(data)
+            except Exception as e:
+                adapters.append({"_filename": f.name, "_error": str(e)})
+    return adapters
+
+
+def load_discovered_endpoints():
+    """Load the latest discovered endpoints file."""
+    fp = Path(config.attacks_dir) / config.discovery_file
+    if fp.exists():
+        with open(fp) as f:
+            return json.load(f)
+    return None
+
+
+def get_process_status(proc_id):
+    """Get status of an attack process."""
+    if proc_id not in active_processes:
+        return None
+    entry = active_processes[proc_id]
+    proc = entry["process"]
+    elapsed = time.time() - entry["start_time"]
+    return {
+        "id": proc_id,
+        "running": proc.poll() is None,
+        "return_code": proc.returncode,
+        "elapsed_seconds": round(elapsed, 1),
+        "config": entry["config"],
+        "started_at": entry["started_at_iso"],
+    }
+
+
+# ── Page Routes ────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    """Attack dashboard — overview of capabilities and status."""
+    return render_template("index.html", config=config)
+
+
+@app.route("/discovery")
+def discovery_page():
+    """Endpoint discovery page."""
+    return render_template("discovery.html", config=config)
+
+
+@app.route("/strategies")
+def strategies_page():
+    """Attack strategy configuration page."""
+    return render_template("strategies.html", config=config)
+
+
+@app.route("/execute")
+def execute_page():
+    """Attack execution and monitoring page."""
+    return render_template("execute.html", config=config)
+
+
+@app.route("/results")
+def results_page():
+    """Attack results and history page."""
+    return render_template("results.html", config=config)
+
+
+# ── API Routes ─────────────────────────────────────────────────────
+
+@app.route("/api/health")
+def api_health():
+    running = sum(1 for e in active_processes.values() if e["process"].poll() is None)
+    return jsonify({
+        "status": "healthy",
+        "active_attacks": running,
+        "total_attacks": len(attack_history),
+        "target_url": config.target_url,
+    })
+
+
+# -- Discovery API --
+
+@app.route("/api/discovery/run", methods=["POST"])
+def api_discovery_run():
+    """Run endpoint discovery against the target."""
+    global discovery_result
+    body = request.get_json(silent=True) or {}
+    target = body.get("target_url", config.target_url)
+    max_depth = body.get("max_depth", config.discovery_max_depth)
+    timeout = body.get("timeout", config.discovery_timeout)
+
+    script = Path(config.attacks_dir) / "endpoint-discovery.py"
+    if not script.exists():
+        return jsonify({"error": "endpoint-discovery.py not found"}), 404
+
+    output_file = Path(config.attacks_dir) / "discovered-endpoints-latest.json"
+    cmd = [
+        sys.executable, str(script),
+        "--url", target,
+        "--max-depth", str(max_depth),
+        "--timeout", str(timeout),
+        "--output", str(output_file),
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if output_file.exists():
+            with open(output_file) as f:
+                discovery_result = json.load(f)
+            return jsonify({
+                "status": "completed",
+                "endpoints_found": len(discovery_result.get("endpoints", [])),
+                "result": discovery_result,
+                "stdout": result.stdout[-2000:] if result.stdout else "",
+            })
+        else:
+            return jsonify({
+                "status": "failed",
+                "stderr": result.stderr[-2000:] if result.stderr else "",
+                "returncode": result.returncode,
+            }), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Discovery timed out"}), 504
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/discovery/endpoints")
+def api_discovery_endpoints():
+    """Get the latest discovered endpoints."""
+    endpoints = load_discovered_endpoints()
+    if endpoints:
+        return jsonify(endpoints)
+    if discovery_result:
+        return jsonify(discovery_result)
+    return jsonify({"endpoints": [], "message": "No discovery run yet"})
+
+
+# -- Strategy API --
+
+@app.route("/api/strategies")
+def api_strategies():
+    """List all available attack strategies."""
+    return jsonify({"strategies": load_strategies()})
+
+
+@app.route("/api/strategies/<filename>")
+def api_strategy_detail(filename):
+    """Get details of a specific strategy."""
+    fp = Path(config.configs_dir) / "attack-strategies" / filename
+    if not fp.exists():
+        return jsonify({"error": "Strategy not found"}), 404
+    with open(fp) as f:
+        return jsonify(yaml.safe_load(f))
+
+
+@app.route("/api/adapters")
+def api_adapters():
+    """List all target adapters."""
+    return jsonify({"adapters": load_target_adapters()})
+
+
+# -- Attack Execution API --
+
+@app.route("/api/attack/launch", methods=["POST"])
+def api_attack_launch():
+    """Launch an attack with the given configuration."""
+    body = request.get_json(silent=True) or {}
+
+    attack_type = body.get("type", "app_level")
+    strategy_file = body.get("strategy")
+    target_url = body.get("target_url", config.target_url)
+    duration = body.get("duration", config.default_duration)
+    workers = body.get("workers", config.default_workers)
+    mode = body.get("mode", config.default_mode)
+    pattern = body.get("pattern", config.default_pattern)
+
+    # Determine which script to use
+    if attack_type == "orchestrated" and strategy_file:
+        script = Path(config.attacks_dir) / "orchestrator.py"
+        cmd = [
+            sys.executable, str(script),
+            "--config", str(Path(config.configs_dir) / "attack-strategies" / strategy_file),
+            "--duration", str(duration),
+        ]
+    elif attack_type == "network_level":
+        script = Path(config.attacks_dir) / "network_crossfire_enhanced.py"
+        cmd = [
+            sys.executable, str(script),
+            "--url", target_url,
+            "--duration", str(duration),
+            "--workers", str(workers),
+            "--mode", mode,
+            "--pattern", pattern,
+        ]
+    else:
+        script = Path(config.attacks_dir) / "crossfire_enhanced.py"
+        cmd = [
+            sys.executable, str(script),
+            "--url", target_url,
+            "--duration", str(duration),
+            "--workers", str(workers),
+            "--mode", mode,
+            "--pattern", pattern,
+        ]
+
+    if not script.exists():
+        return jsonify({"error": f"Script {script.name} not found"}), 404
+
+    # Launch subprocess
+    proc_id = f"attack-{int(time.time())}-{len(active_processes)}"
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=config.attacks_dir,
+        )
+        active_processes[proc_id] = {
+            "process": proc,
+            "config": {
+                "type": attack_type,
+                "target_url": target_url,
+                "duration": duration,
+                "workers": workers,
+                "mode": mode,
+                "pattern": pattern,
+                "strategy": strategy_file,
+                "script": script.name,
+            },
+            "start_time": time.time(),
+            "started_at_iso": datetime.utcnow().isoformat() + "Z",
+            "output_lines": [],
+        }
+
+        # Background thread to collect output
+        def _collect(pid, p):
+            for line in p.stdout:
+                if pid in active_processes:
+                    active_processes[pid]["output_lines"].append(line.rstrip())
+                    # Keep only last 500 lines
+                    if len(active_processes[pid]["output_lines"]) > 500:
+                        active_processes[pid]["output_lines"] = active_processes[pid]["output_lines"][-500:]
+                    socketio.emit("attack_output", {"id": pid, "line": line.rstrip()})
+
+        t = threading.Thread(target=_collect, args=(proc_id, proc), daemon=True)
+        t.start()
+
+        return jsonify({"id": proc_id, "status": "launched", "config": active_processes[proc_id]["config"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/attack/stop", methods=["POST"])
+def api_attack_stop():
+    """Stop a running attack."""
+    body = request.get_json(silent=True) or {}
+    proc_id = body.get("id")
+    if not proc_id or proc_id not in active_processes:
+        return jsonify({"error": "Unknown attack id"}), 404
+
+    entry = active_processes[proc_id]
+    proc = entry["process"]
+    if proc.poll() is None:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    status = get_process_status(proc_id)
+    attack_history.append(status)
+    return jsonify({"status": "stopped", "detail": status})
+
+
+@app.route("/api/attack/status")
+def api_attack_status():
+    """Get status of all active attacks."""
+    statuses = []
+    for pid in list(active_processes):
+        s = get_process_status(pid)
+        if s:
+            statuses.append(s)
+    return jsonify({"attacks": statuses})
+
+
+@app.route("/api/attack/status/<proc_id>")
+def api_attack_status_detail(proc_id):
+    """Get detailed status of a specific attack."""
+    s = get_process_status(proc_id)
+    if not s:
+        return jsonify({"error": "Unknown attack id"}), 404
+    s["output"] = active_processes[proc_id].get("output_lines", [])[-50:]
+    return jsonify(s)
+
+
+@app.route("/api/attack/history")
+def api_attack_history():
+    """Get history of completed attacks."""
+    return jsonify({"history": attack_history})
+
+
+# -- Metrics API (proxy to Prometheus) --
+
+@app.route("/api/metrics/target")
+def api_metrics_target():
+    """Get target service metrics from Prometheus."""
+    import requests as req
+    query = request.args.get("query", 'rate(http_requests_total[1m])')
+    try:
+        r = req.get(
+            f"{config.prometheus_url}/api/v1/query",
+            params={"query": query},
+            timeout=10,
+        )
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
+# ── WebSocket Events ───────────────────────────────────────────────
+
+@socketio.on("connect")
+def handle_connect():
+    """Client connected — send current state."""
+    statuses = []
+    for pid in active_processes:
+        s = get_process_status(pid)
+        if s:
+            statuses.append(s)
+    socketio.emit("state_sync", {"attacks": statuses})
+
+
+def _background_emitter():
+    """Periodically emit attack status updates."""
+    while True:
+        socketio.sleep(5)
+        statuses = []
+        finished = []
+        for pid in list(active_processes):
+            s = get_process_status(pid)
+            if s:
+                statuses.append(s)
+                if not s["running"]:
+                    finished.append(pid)
+
+        if statuses:
+            socketio.emit("attack_status_update", {"attacks": statuses})
+
+        # Archive finished attacks
+        for pid in finished:
+            s = get_process_status(pid)
+            if s:
+                attack_history.append(s)
+            del active_processes[pid]
+
+
+# ── Main ───────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    socketio.start_background_task(_background_emitter)
+    socketio.run(app, host="0.0.0.0", port=config.frontend_port, debug=False)

@@ -1,0 +1,45 @@
+component: mitigation
+version: 1.0.0
+description: DDoS mitigation strategies (Kubernetes-native, Istio, Nephio)
+
+strategies:
+  - name: kubernetes-native
+    description: Native K8s resource controls
+    manifests:
+      - kubernetes-native/resource-quotas/*.yaml
+      - kubernetes-native/network-policies/*.yaml
+      - kubernetes-native/autoscaling/*.yaml
+    requires:
+      - kubernetes_cluster
+    
+  - name: istio-advanced
+    description: Istio service mesh features
+    manifests:
+      - istio-advanced/rate-limiting/*.yaml
+      - istio-advanced/circuit-breaking/*.yaml
+      - istio-advanced/traffic-shifting/*.yaml
+    requires:
+      - kubernetes_cluster
+      - istio
+    
+  - name: nephio
+    description: Nephio-based network function orchestration
+    packages:
+      - nephio/packages/crossfire-protection-package/
+      - nephio/packages/ddos-mitigation-base/
+    requires:
+      - kubernetes_cluster
+      - nephio
+
+requires:
+  - kubernetes_cluster: "Any K8s cluster >=1.28"
+  - target_namespace: "Namespace to protect (default: sock-shop)"
+
+optional:
+  - istio_enabled: "Required for Istio-based strategies"
+  - nephio_enabled: "Required for Nephio packages"
+
+dependencies:
+  kubernetes: ">=1.28"
+  istio: ">=1.18"  # For istio-advanced strategy
+  nephio: ">=0.2"  # For nephio strategy

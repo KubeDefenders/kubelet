@@ -1,0 +1,50 @@
+---
+# Configuration for the CrossfireDetector.
+# All thresholds are overridable via environment variables.
+# This ConfigMap allows per-cluster tuning without rebuilding the image.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crossfire-detector-config
+  namespace: crossfire-system  # kpt-set: ${system-namespace}
+  labels:
+    app.kubernetes.io/component: detector
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+data:
+  # Prometheus endpoint (kube-prometheus-stack default)
+  PROMETHEUS_URL: "http://prometheus.monitoring.svc.cluster.local:9090"  # kpt-set: ${prometheus-url}
+
+  # Detection thresholds
+  # How loaded the node NIC must be to investigate further (%)
+  LINK_UTILIZATION_THRESHOLD_PCT: "5.0"  # kpt-set: ${link-utilization-threshold-pct}  # lowered for minikube
+
+  # What fraction of link capacity must be consumed by decoy pods (0.0-1.0)
+  DECOY_FRACTION_THRESHOLD: "0.10"  # kpt-set: ${decoy-fraction-threshold}  # lowered for minikube
+
+  # Service error rate that counts as "degraded" (%)
+  VICTIM_ERROR_RATE_THRESHOLD_PCT: "1.0"  # kpt-set: ${victim-error-rate-threshold-pct}  # lowered for minikube
+
+  # Max % of NIC traffic targeting victim before it's considered a direct attack (%)
+  # This is the crossfire invariant 4 threshold
+  VICTIM_DIRECT_TRAFFIC_MAX_PCT: "10.0"  # kpt-set: ${victim-direct-traffic-max-pct}
+
+  # Minimum confidence score to emit a DetectionEvent (0.0-1.0)
+  CONFIDENCE_THRESHOLD: "0.30"  # kpt-set: ${confidence-threshold}  # lowered for minikube
+
+  # How often to evaluate invariants (seconds)
+  EVALUATION_INTERVAL_SECONDS: "10"  # kpt-set: ${evaluation-interval-seconds}  # faster for experiments
+
+  # Prometheus query range window (seconds)
+  DETECTION_WINDOW_SECONDS: "60"  # kpt-set: ${detection-window-seconds}
+
+  # Consecutive evaluation windows that must ALL confirm before creating an event
+  # Increase to reduce false positives; decrease for faster detection
+  CONFIRMATION_WINDOWS: "1"  # kpt-set: ${confirmation-windows}  # reduced for faster detection in experiments
+
+  # Assumption about node NIC capacity (Mbps).
+  # Override if your nodes have non-1Gbps NICs.
+  # In production, annotate nodes with crossfire.io/nic-capacity-mbps instead.
+  DEFAULT_NIC_CAPACITY_MBPS: "10.0"  # kpt-set: ${nic-capacity-mbps}  # lower for minikube virtual NIC
+
+  # Port for Prometheus metrics endpoint
+  METRICS_PORT: "8080"

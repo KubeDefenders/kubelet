@@ -1,0 +1,84 @@
+---
+# Namespace-level resource quota
+# Prevents a single namespace from exhausting cluster resources
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: sock-shop-quota
+  namespace: sock-shop
+spec:
+  hard:
+    # Compute resources
+    requests.cpu: "20"           # Total CPU requests allowed
+    requests.memory: 32Gi         # Total memory requests allowed
+    limits.cpu: "40"              # Total CPU limits allowed
+    limits.memory: 64Gi           # Total memory limits allowed
+    
+    # Object counts
+    pods: "100"                   # Maximum number of pods
+    services: "50"                # Maximum number of services
+    persistentvolumeclaims: "20"  # Maximum PVCs
+    
+    # Prevent resource exhaustion attacks
+    requests.storage: "100Gi"     # Total storage requests
+    
+    # Network resource limits
+    services.loadbalancers: "5"   # Limit expensive resources
+    services.nodeports: "10"      # Limit NodePort exposure
+---
+# Compute resource quota for different priority classes
+# Critical services get more resources
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: critical-services-quota
+  namespace: sock-shop
+spec:
+  hard:
+    requests.cpu: "10"
+    requests.memory: 16Gi
+    limits.cpu: "20"
+    limits.memory: 32Gi
+  scopeSelector:
+    matchExpressions:
+    - operator: In
+      scopeName: PriorityClass
+      values: ["critical-priority"]
+---
+# Best-effort workload quota
+# Decoy services get limited resources
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: decoy-services-quota
+  namespace: sock-shop
+spec:
+  hard:
+    requests.cpu: "5"
+    requests.memory: 8Gi
+    limits.cpu: "10"
+    limits.memory: 16Gi
+  scopeSelector:
+    matchExpressions:
+    - operator: In
+      scopeName: PriorityClass
+      values: ["decoy-priority"]
+---
+# Anti-DDoS: Connection limits via ResourceQuota
+# Limit network-intensive resources
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: network-quota
+  namespace: sock-shop
+spec:
+  hard:
+    # Limit the number of services (prevents service flood)
+    services: "30"
+    
+    # Limit endpoints (prevents endpoint saturation)
+    count/endpoints: "50"
+    
+    # Limit configmaps and secrets (prevents config attacks)
+    configmaps: "50"
+    secrets: "50"

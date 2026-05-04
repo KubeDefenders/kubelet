@@ -1,0 +1,29 @@
+# Stealth Attack Strategy
+# Low-intensity attack for testing detection capabilities without overwhelming the target
+
+name: "Stealth Test"
+description: "Low-intensity crossfire attack for validating detection systems"
+
+target_url: "http://target-service:8080"
+adapter_config: "configs/target-adapters/sock-shop.yaml"
+discovery_file: "discovered-endpoints.json"
+
+# Attack vector configuration
+app_level:
+  enabled: true
+  script: "crossfire_enhanced.py"
+  workers: 10
+  mode: "stealth"
+  pattern: "random"
+  rate: 5  # 5 requests/second per worker
+  additional_args:
+    stealth: true
+    no-adaptation: false
+
+network_level:
+  enabled: false
+
+# Attack phases (seconds)
+phases:
+  ramp_up: 20
+  ramp_down: 20

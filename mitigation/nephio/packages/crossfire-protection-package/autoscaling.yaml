@@ -1,0 +1,209 @@
+---
+# Nephio-managed HPA for Crossfire Protection
+# Replicates kubernetes-native/autoscaling functionality with enhancements
+apiVersion: workload.nephio.org/v1alpha1
+kind: AutoScaling
+metadata:
+  name: front-end-autoscaling
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/package: crossfire-protection
+  annotations:
+    nephio.org/description: "Auto-scaling for front-end service"
+    nephio.org/capacity-request: "automatic"
+spec:
+  # Nephio intent-based capacity
+  intent:
+    service: front-end
+    capacityRequest:
+      requestsPerSecond: 5000 # kpt-set: ${max-rps}
+      concurrentConnections: 2000
+      responseTime: 100ms
+    availabilitySLO: 99.9
+  
+  # Standard HPA configuration
+  horizontalPodAutoscaler:
+    scaleTargetRef:
+      apiVersion: apps/v1
+      kind: Deployment
+      name: front-end
+    minReplicas: 2
+    maxReplicas: 20 # kpt-set: ${max-pods}
+    metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70 # kpt-set: ${cpu-scale-threshold}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80 # kpt-set: ${memory-scale-threshold}
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 30
+        policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+        selectPolicy: Max
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+---
+apiVersion: workload.nephio.org/v1alpha1
+kind: AutoScaling
+metadata:
+  name: catalogue-autoscaling
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: decoy
+  annotations:
+    nephio.org/description: "Aggressive auto-scaling for decoy service"
+spec:
+  intent:
+    service: catalogue
+    capacityRequest:
+      requestsPerSecond: 10000
+      concurrentConnections: 3000
+      responseTime: 200ms
+    availabilitySLO: 99.0  # Lower SLO for decoy
+  
+  horizontalPodAutoscaler:
+    scaleTargetRef:
+      apiVersion: apps/v1
+      kind: Deployment
+      name: catalogue
+    minReplicas: 1
+    maxReplicas: 30
+    metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "1000"
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 15
+        policies:
+        - type: Percent
+          value: 200
+          periodSeconds: 15
+        - type: Pods
+          value: 5
+          periodSeconds: 15
+        selectPolicy: Max
+      scaleDown:
+        stabilizationWindowSeconds: 600
+        policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+---
+# Nephio-exclusive: Multi-cluster capacity coordination
+apiVersion: workload.nephio.org/v1alpha1
+kind: CapacityRequest
+metadata:
+  name: crossfire-capacity-coordination
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Coordinate capacity across multiple clusters during attack"
+spec:
+  # Request capacity injection when attack detected
+  trigger:
+    attackDetected: true
+    attackType: crossfire-app
+    severity: high
+  
+  # Capacity requirements
+  capacity:
+    requestsPerSecond: 20000  # Total across all clusters
+    concurrentConnections: 10000
+    bandwidth:
+      downlink: 10Gbps
+      uplink: 5Gbps
+  
+  # Distribution strategy
+  distribution:
+    strategy: weighted
+    clusters:
+    - name: edge-cluster-01
+      weight: 40
+      maxPods: 40
+    - name: edge-cluster-02
+      weight: 30
+      maxPods: 30
+    - name: core-cluster-01
+      weight: 30
+      maxPods: 30
+  
+  # Scaling policy
+  scalingPolicy:
+    scaleUpAggressiveness: maximum
+    scaleDownDelay: 600s
+    cooldownPeriod: 300s
+---
+# Nephio-exclusive: Predictive autoscaling based on attack patterns
+apiVersion: workload.nephio.org/v1alpha1
+kind: PredictiveAutoscaling
+metadata:
+  name: ml-based-predictive-scaling
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "ML-based predictive scaling for proactive defense"
+spec:
+  # Use ML detector to predict attack and pre-scale
+  predictionSource:
+    type: ml-detector
+    endpoint: http://ml-detector.sock-shop.svc.cluster.local:5000
+    model: crossfire-predictor
+  
+  # Pre-scaling configuration
+  preScaling:
+    enabled: true
+    predictionWindow: 60s  # Scale 60s before predicted attack
+    confidenceThreshold: 0.7
+  
+  # Target services
+  targets:
+  - service: front-end
+    preScaleReplicas: 10
+  - service: catalogue
+    preScaleReplicas: 15
+  - service: cart
+    preScaleReplicas: 10
+  
+  # Rollback if prediction was false
+  rollback:
+    enabled: true
+    timeout: 300s
+    evaluateAfter: 120s

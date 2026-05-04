@@ -1,0 +1,22 @@
+# ML-Optimized DDoS Detector - Python Dependencies
+
+# Core ML libraries
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+
+# Feature extraction
+requests>=2.31.0
+pyyaml>=6.0
+
+# Logging
+loguru>=0.7.0
+
+# Model persistence
+joblib>=1.3.0
+
+# Explainable AI
+shap>=0.42.0
+
+# Optional: for improved performance
+# numba>=0.57.0  # Speeds up SHAP

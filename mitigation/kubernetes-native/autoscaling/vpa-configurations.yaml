@@ -1,0 +1,96 @@
+---
+# VPA for catalogue database
+# Automatically adjust database resources based on load
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: catalogue-db-vpa
+  namespace: sock-shop
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: catalogue-db
+  updatePolicy:
+    updateMode: "Auto"  # Automatically apply recommendations
+  resourcePolicy:
+    containerPolicies:
+    - containerName: catalogue-db
+      minAllowed:
+        cpu: 100m
+        memory: 256Mi
+      maxAllowed:
+        cpu: 2
+        memory: 4Gi
+      controlledResources:
+      - cpu
+      - memory
+---
+# VPA for carts database
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: carts-db-vpa
+  namespace: sock-shop
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: carts-db
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: carts-db
+      minAllowed:
+        cpu: 100m
+        memory: 256Mi
+      maxAllowed:
+        cpu: 2
+        memory: 4Gi
+---
+# VPA for orders database (critical)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: orders-db-vpa
+  namespace: sock-shop
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: orders-db
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: orders-db
+      minAllowed:
+        cpu: 200m        # Higher minimum for critical service
+        memory: 512Mi
+      maxAllowed:
+        cpu: 4           # Higher maximum
+        memory: 8Gi
+---
+# VPA for user database
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: user-db-vpa
+  namespace: sock-shop
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: user-db
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: user-db
+      minAllowed:
+        cpu: 100m
+        memory: 256Mi
+      maxAllowed:
+        cpu: 2
+        memory: 4Gi

@@ -1,0 +1,267 @@
+---
+# Circuit breaker for front-end service
+# Protects downstream services from overload
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: front-end-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: front-end.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100          # Max TCP connections
+      http:
+        http1MaxPendingRequests: 50  # Max requests waiting for connection
+        http2MaxRequests: 100         # Max HTTP/2 requests
+        maxRequestsPerConnection: 2   # Limit reuse
+        maxRetries: 3                 # Max concurrent retries
+    outlierDetection:
+      consecutive5xxErrors: 5         # Evict after 5 errors
+      interval: 30s                   # Check every 30s
+      baseEjectionTime: 30s           # Evict for 30s minimum
+      maxEjectionPercent: 50          # Max 50% of pods evicted
+      minHealthPercent: 40            # Keep at least 40% healthy
+---
+# Circuit breaker for catalogue (decoy service)
+# More lenient to absorb attacks
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: catalogue-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: catalogue.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 200          # Higher limit for decoy
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 200
+        maxRequestsPerConnection: 3
+        maxRetries: 2                # Fewer retries
+    outlierDetection:
+      consecutive5xxErrors: 10       # More tolerant
+      interval: 60s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 70         # Can evict more
+      minHealthPercent: 30
+    loadBalancer:
+      simple: LEAST_REQUEST          # Distribute load evenly
+---
+# Circuit breaker for cart (decoy service)
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: carts-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: carts.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 150
+      http:
+        http1MaxPendingRequests: 75
+        http2MaxRequests: 150
+        maxRequestsPerConnection: 3
+        maxRetries: 2
+    outlierDetection:
+      consecutive5xxErrors: 10
+      interval: 60s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 70
+      minHealthPercent: 30
+---
+# Circuit breaker for user (decoy service)
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: user-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: user.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 2
+        maxRetries: 2
+    outlierDetection:
+      consecutive5xxErrors: 10
+      interval: 60s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 70
+      minHealthPercent: 30
+---
+# Circuit breaker for payment (critical service)
+# Very strict to protect integrity
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: payment-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: payment.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50           # Strict limits
+      http:
+        http1MaxPendingRequests: 25
+        http2MaxRequests: 50
+        maxRequestsPerConnection: 1   # No connection reuse
+        maxRetries: 1                 # Minimal retries
+    outlierDetection:
+      consecutive5xxErrors: 3         # Evict quickly
+      interval: 20s                   # Check frequently
+      baseEjectionTime: 60s           # Longer ejection
+      maxEjectionPercent: 30          # Protect availability
+      minHealthPercent: 70            # Keep most pods healthy
+    loadBalancer:
+      consistentHash:                 # Session affinity for payment
+        httpCookie:
+          name: payment-session
+          ttl: 3600s
+---
+# Circuit breaker for orders (critical service)
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: orders-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: orders.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 25
+        http2MaxRequests: 50
+        maxRequestsPerConnection: 1
+        maxRetries: 1
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 20s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 30
+      minHealthPercent: 70
+---
+# Circuit breaker for shipping (critical service)
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: shipping-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: shipping.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 25
+        http2MaxRequests: 50
+        maxRequestsPerConnection: 1
+        maxRetries: 1
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 20s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 30
+      minHealthPercent: 70
+---
+# Circuit breaker for catalogue database
+# Protect database from connection exhaustion
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: catalogue-db-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: catalogue-db.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 20           # Strict DB connection limit
+        connectTimeout: 5s
+        tcpKeepalive:
+          time: 7200s
+          interval: 75s
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 120s         # Longer ejection for DB
+      maxEjectionPercent: 0          # Never evict DB (only 1 replica)
+---
+# Circuit breaker for carts database
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: carts-db-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: carts-db.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 20
+        connectTimeout: 5s
+        tcpKeepalive:
+          time: 7200s
+          interval: 75s
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 120s
+      maxEjectionPercent: 0
+---
+# Circuit breaker for orders database
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: orders-db-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: orders-db.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 20
+        connectTimeout: 5s
+        tcpKeepalive:
+          time: 7200s
+          interval: 75s
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 120s
+      maxEjectionPercent: 0
+---
+# Circuit breaker for user database
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: user-db-circuit-breaker
+  namespace: sock-shop
+spec:
+  host: user-db.sock-shop.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 20
+        connectTimeout: 5s
+        tcpKeepalive:
+          time: 7200s
+          interval: 75s
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 120s
+      maxEjectionPercent: 0

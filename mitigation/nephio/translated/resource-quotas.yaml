@@ -1,0 +1,85 @@
+---
+# Nephio-Enhanced ResourceQuotas
+# Translated from Nephio ResourceQuota intents
+# Key difference: Service-class based quotas, capacity annotations
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: nephio-sock-shop-quota
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/intent: "ResourceQuota"
+  annotations:
+    nephio.org/capacity-intent: "namespace-wide protection"
+    nephio.org/description: "Namespace-wide resource limits to prevent exhaustion"
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: 32Gi
+    limits.cpu: "40"
+    limits.memory: 64Gi
+    pods: "100"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: nephio-critical-services-quota
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: "critical"
+  annotations:
+    nephio.org/description: "Reserved resources for critical services (orders, payment)"
+spec:
+  hard:
+    requests.cpu: "12"
+    requests.memory: 20Gi
+    pods: "50"
+  scopeSelector:
+    matchExpressions:
+    - operator: In
+      scopeName: PriorityClass
+      values:
+      - critical-priority
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: nephio-decoy-services-quota
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/service-class: "decoy"
+  annotations:
+    nephio.org/intent: "limit decoy resource consumption"
+    nephio.org/description: "Restrict resources for decoy services to protect critical services"
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    pods: "20"
+  scopeSelector:
+    matchExpressions:
+    - operator: In
+      scopeName: PriorityClass
+      values:
+      - decoy-priority
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: nephio-network-quota
+  namespace: sock-shop
+  labels:
+    nephio.org/managed: "true"
+  annotations:
+    nephio.org/description: "Network resource limits"
+spec:
+  hard:
+    services: "50"
+    services.loadbalancers: "5"

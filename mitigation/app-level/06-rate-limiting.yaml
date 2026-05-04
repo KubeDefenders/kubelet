@@ -1,0 +1,180 @@
+---
+# Application-Level Mitigation: Rate Limiting at Gateway
+# Limits requests per IP to prevent HTTP flood attacks
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rate-limit-config
+  namespace: sock-shop
+data:
+  README: |
+    Gateway Rate Limiting Configuration
+    
+    During Attack:
+    - Attack source: 192.168.49.2 (single IP)
+    - Attack rate: 94-102 req/s sustained
+    - No rate limiting applied
+    
+    With Rate Limiting:
+    - Allow 50 req/s per IP (bursts to 100)
+    - Block attack traffic at gateway
+    - Prevents flood from reaching services
+    
+    Result: 50% attack traffic blocked before hitting pods
+
+---
+# Istio EnvoyFilter - Global Rate Limiting
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: rate-limit-filter
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: "envoy.filters.network.http_connection_manager"
+            subFilter:
+              name: "envoy.filters.http.router"
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.local_ratelimit
+        typed_config:
+          "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+          type_url: type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+          value:
+            stat_prefix: http_local_rate_limiter
+            token_bucket:
+              max_tokens: 100          # Burst size
+              tokens_per_fill: 50      # 50 req/s sustained rate
+              fill_interval: 1s
+            filter_enabled:
+              runtime_key: local_rate_limit_enabled
+              default_value:
+                numerator: 100
+                denominator: HUNDRED
+            filter_enforced:
+              runtime_key: local_rate_limit_enforced
+              default_value:
+                numerator: 100
+                denominator: HUNDRED
+            response_headers_to_add:
+            - append: false
+              header:
+                key: x-local-rate-limit
+                value: 'true'
+
+---
+# Sock Shop Gateway with Rate Limiting
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: sock-shop-gateway-ratelimit
+  namespace: sock-shop
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+
+---
+# VirtualService with Per-Route Rate Limiting
+
+# Front-End with aggressive limits
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: front-end-ratelimit
+  namespace: sock-shop
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - sock-shop-gateway-ratelimit
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: front-end.sock-shop.svc.cluster.local
+        port:
+          number: 8079
+    # Per-route rate limit (requires Envoy config)
+    # metadata:
+    #   filter_metadata:
+    #     envoy.filters.http.local_ratelimit:
+    #       descriptors:
+    #       - entries:
+    #         - key: path
+    #           value: "/"
+    #         token_bucket:
+    #           max_tokens: 100
+    #           tokens_per_fill: 50
+    #           fill_interval: 1s
+
+---
+# Catalogue API Rate Limiting (decoy service)
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: catalogue-ratelimit
+  namespace: sock-shop
+spec:
+  hosts:
+  - "catalogue.sock-shop.svc.cluster.local"
+  http:
+  - match:
+    - uri:
+        prefix: /catalogue
+    route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+
+---
+# Alternative: Kubernetes Ingress with NGINX Rate Limiting
+# (If not using Istio gateway)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sock-shop-ingress-ratelimit
+  namespace: sock-shop
+  annotations:
+    # NGINX rate limiting annotations
+    nginx.ingress.kubernetes.io/limit-rps: "50"              # 50 req/s per IP
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "2"  # Allow burst to 100
+    nginx.ingress.kubernetes.io/limit-connections: "10"      # Max 10 concurrent
+    nginx.ingress.kubernetes.io/limit-rpm: "3000"            # 3000 req/min per IP
+    # Connection timeouts
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "10"
+    # Request size limits
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: sock-shop.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: front-end
+            port:
+              number: 8079

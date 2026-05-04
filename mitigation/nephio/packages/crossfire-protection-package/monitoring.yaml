@@ -1,0 +1,338 @@
+---
+# Nephio-managed Monitoring for Crossfire Protection
+# Enhanced monitoring with Nephio-specific metrics
+apiVersion: workload.nephio.org/v1alpha1
+kind: MonitoringConfig
+metadata:
+  name: crossfire-monitoring
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+    nephio.org/package: crossfire-protection
+  annotations:
+    nephio.org/description: "Comprehensive monitoring for crossfire attacks"
+spec:
+  # Metrics collection
+  metricsCollection:
+    enabled: true
+    interval: 10s
+    retention: 7d
+    
+    # Standard Kubernetes metrics
+    kubernetes:
+    - podMetrics
+    - nodeMetrics
+    - hpaMetrics
+    - resourceQuotas
+    - networkPolicies
+    
+    # Istio/service mesh metrics
+    serviceMesh:
+    - requestRate
+    - errorRate
+    - latency
+    - connectionCount
+    - circuitBreakerStatus
+    
+    # Nephio-specific metrics
+    nephio:
+    - capacityUtilization
+    - packageDeploymentStatus
+    - nfChainLatency
+    - clusterDistribution
+    - spilloverEvents
+  
+  # Attack detection metrics
+  attackDetection:
+    enabled: true
+    metrics:
+    - requestsPerSecond
+    - anomalyScore
+    - attackClassification
+    - mitigationEffectiveness
+    - falsePositiveRate
+    
+    # ML detector integration
+    mlDetector:
+      enabled: true
+      endpoint: http://ml-detector.sock-shop.svc.cluster.local:5000
+      metricsPath: /metrics
+      interval: 5s
+  
+  # Alerting configuration
+  alerting:
+    enabled: true
+    receivers:
+    - name: slack
+      type: slack
+      config:
+        webhookURL: https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+    - name: pagerduty
+      type: pagerduty
+      config:
+        serviceKey: YOUR_SERVICE_KEY
+    
+    # Alert rules
+    rules:
+    - name: crossfire-attack-detected
+      severity: critical
+      condition:
+        metric: anomalyScore
+        operator: ">"
+        threshold: 0.8
+        duration: 30s
+      annotations:
+        summary: "Crossfire attack detected"
+        description: "Anomaly score exceeded 0.8 for 30 seconds"
+      actions:
+      - type: scale
+        target: front-end
+        replicas: 20
+      - type: isolate
+        target: decoy-services
+      - type: notify
+        receivers: [slack, pagerduty]
+    
+    - name: rate-limit-exceeded
+      severity: warning
+      condition:
+        metric: requestsPerSecond
+        operator: ">"
+        threshold: 5000
+        duration: 10s
+      annotations:
+        summary: "Rate limit threshold exceeded"
+        description: "Request rate exceeded 5000 req/s"
+      actions:
+      - type: enable-rate-limiting
+        multiplier: 0.5
+      - type: notify
+        receivers: [slack]
+    
+    - name: service-degradation
+      severity: critical
+      condition:
+        metric: errorRate
+        operator: ">"
+        threshold: 5
+        duration: 60s
+      annotations:
+        summary: "Service degradation detected"
+        description: "Error rate exceeded 5% for 60 seconds"
+      actions:
+      - type: circuit-breaker
+        action: open
+      - type: redirect-traffic
+        destination: backup-cluster
+      - type: notify
+        receivers: [slack, pagerduty]
+    
+    - name: hpa-max-replicas-reached
+      severity: warning
+      condition:
+        metric: hpaReplicasAtMax
+        operator: "=="
+        threshold: true
+        duration: 60s
+      annotations:
+        summary: "HPA reached maximum replicas"
+        description: "Service scaled to maximum, consider cluster expansion"
+      actions:
+      - type: request-capacity
+        additionalClusters: 1
+      - type: notify
+        receivers: [slack]
+---
+# Nephio-exclusive: Telemetry aggregation across clusters
+apiVersion: workload.nephio.org/v1alpha1
+kind: TelemetryAggregation
+metadata:
+  name: multi-cluster-telemetry
+  namespace: nephio-system
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Aggregate telemetry from all clusters"
+spec:
+  # Collect from multiple clusters
+  sources:
+  - cluster: edge-cluster-01
+    namespace: sock-shop
+    metrics:
+      - requestRate
+      - errorRate
+      - cpuUtilization
+      - memoryUtilization
+  
+  - cluster: edge-cluster-02
+    namespace: sock-shop
+    metrics:
+      - requestRate
+      - errorRate
+      - cpuUtilization
+      - memoryUtilization
+  
+  - cluster: core-cluster-01
+    namespace: sock-shop
+    metrics:
+      - requestRate
+      - errorRate
+      - cpuUtilization
+      - memoryUtilization
+  
+  # Aggregation configuration
+  aggregation:
+    method: sum
+    interval: 10s
+    window: 1m
+  
+  # Cross-cluster correlation
+  correlation:
+    enabled: true
+    correlateBy:
+    - sourceIP
+    - userAgent
+    - attackSignature
+    window: 5m
+  
+  # Export aggregated metrics
+  export:
+    prometheus:
+      enabled: true
+      endpoint: http://prometheus.monitoring.svc:9090
+    grafana:
+      enabled: true
+      dashboards:
+      - crossfire-attack-overview
+      - cluster-distribution
+      - mitigation-effectiveness
+---
+# Nephio-exclusive: Attack pattern learning and sharing
+apiVersion: workload.nephio.org/v1alpha1
+kind: AttackPatternLearning
+metadata:
+  name: distributed-attack-learning
+  namespace: nephio-system
+  labels:
+    nephio.org/exclusive: "true"
+  annotations:
+    nephio.org/description: "Learn and share attack patterns across clusters"
+spec:
+  # Pattern collection
+  collection:
+    enabled: true
+    sources:
+    - ml-detector
+    - rate-limiter
+    - traffic-scrubber
+    interval: 60s
+  
+  # Pattern analysis
+  analysis:
+    enabled: true
+    mlEndpoint: http://ml-detector.sock-shop.svc.cluster.local:5000
+    features:
+    - requestRate
+    - sourceIPDistribution
+    - userAgentPattern
+    - payloadSize
+    - requestPath
+    - timingPattern
+  
+  # Pattern sharing (federated learning)
+  sharing:
+    enabled: true
+    protocol: grpc
+    clusters:
+    - edge-cluster-01
+    - edge-cluster-02
+    - core-cluster-01
+    syncInterval: 300s
+    
+  # Pattern application
+  application:
+    autoApply: true
+    confidenceThreshold: 0.8
+    testPeriod: 3600s
+    rollback:
+      enabled: true
+      evaluateAfter: 1800s
+---
+# ServiceMonitor for Prometheus integration
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: crossfire-protection-metrics
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+spec:
+  selector:
+    matchLabels:
+      nephio.org/monitored: "true"
+  endpoints:
+  - port: metrics
+    interval: 10s
+    path: /metrics
+  - port: istio-metrics
+    interval: 10s
+    path: /stats/prometheus
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: crossfire-attack-alerts
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  labels:
+    nephio.org/managed: "true"
+spec:
+  groups:
+  - name: crossfire-attacks
+    interval: 10s
+    rules:
+    - alert: CrossfireAttackDetected
+      expr: ml_detector_anomaly_score > 0.8
+      for: 30s
+      labels:
+        severity: critical
+        attack_type: crossfire
+      annotations:
+        summary: "Crossfire attack detected"
+        description: "ML detector anomaly score is {{ $value }}"
+    
+    - alert: RateLimitThresholdExceeded
+      expr: rate(istio_requests_total[1m]) > 5000
+      for: 10s
+      labels:
+        severity: warning
+      annotations:
+        summary: "Rate limit threshold exceeded"
+        description: "Request rate is {{ $value }} req/s"
+    
+    - alert: ServiceErrorRateHigh
+      expr: rate(istio_requests_total{response_code=~"5.."}[1m]) / rate(istio_requests_total[1m]) > 0.05
+      for: 60s
+      labels:
+        severity: critical
+      annotations:
+        summary: "Service error rate high"
+        description: "Error rate is {{ $value | humanizePercentage }}"
+    
+    - alert: HPAAtMaxReplicas
+      expr: kube_horizontalpodautoscaler_status_current_replicas == kube_horizontalpodautoscaler_spec_max_replicas
+      for: 60s
+      labels:
+        severity: warning
+      annotations:
+        summary: "HPA at maximum replicas"
+        description: "{{ $labels.horizontalpodautoscaler }} cannot scale further"
+    
+    - alert: NetworkPolicyBlocking
+      expr: increase(networkpolicy_drop_count_total[5m]) > 1000
+      for: 30s
+      labels:
+        severity: info
+      annotations:
+        summary: "Network policy blocking traffic"
+        description: "{{ $value }} packets dropped in last 5 minutes"

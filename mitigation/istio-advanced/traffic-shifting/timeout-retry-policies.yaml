@@ -1,0 +1,196 @@
+---
+# VirtualService for front-end with timeouts and retries
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: front-end-vs
+  namespace: sock-shop
+spec:
+  hosts:
+  - front-end.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: front-end.sock-shop.svc.cluster.local
+        port:
+          number: 8079
+    timeout: 10s                    # Request timeout
+    retries:
+      attempts: 2                   # Retry twice
+      perTryTimeout: 3s             # Timeout per retry
+      retryOn: 5xx,reset,connect-failure,refused-stream
+---
+# VirtualService for catalogue (decoy) with aggressive timeouts
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: catalogue-vs
+  namespace: sock-shop
+spec:
+  hosts:
+  - catalogue.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+        port:
+          number: 80
+    timeout: 5s                     # Shorter timeout for decoy
+    retries:
+      attempts: 1                   # Fewer retries
+      perTryTimeout: 2s
+      retryOn: 5xx,reset
+---
+# VirtualService for cart (decoy)
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: carts-vs
+  namespace: sock-shop
+spec:
+  hosts:
+  - carts.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: carts.sock-shop.svc.cluster.local
+        port:
+          number: 80
+    timeout: 5s
+    retries:
+      attempts: 1
+      perTryTimeout: 2s
+      retryOn: 5xx,reset
+---
+# VirtualService for user (decoy)
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: user-vs
+  namespace: sock-shop
+spec:
+  hosts:
+  - user.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: user.sock-shop.svc.cluster.local
+        port:
+          number: 80
+    timeout: 5s
+    retries:
+      attempts: 1
+      perTryTimeout: 2s
+      retryOn: 5xx,reset
+---
+# VirtualService for payment (critical) with strict controls
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: payment-vs
+  namespace: sock-shop
+spec:
+  hosts:
+  - payment.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: payment.sock-shop.svc.cluster.local
+        port:
+          number: 80
+    timeout: 30s                    # Longer timeout for payments
+    retries:
+      attempts: 0                   # No retries for idempotency
+---
+# VirtualService for orders (critical)
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: orders-vs
+  namespace: sock-shop
+spec:
+  hosts:
+  - orders.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: orders.sock-shop.svc.cluster.local
+        port:
+          number: 80
+    timeout: 30s
+    retries:
+      attempts: 0                   # No retries for order creation
+---
+# VirtualService for shipping (critical)
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: shipping-vs
+  namespace: sock-shop
+spec:
+  hosts:
+  - shipping.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: shipping.sock-shop.svc.cluster.local
+        port:
+          number: 80
+    timeout: 20s
+    retries:
+      attempts: 1
+      perTryTimeout: 10s
+      retryOn: 5xx
+---
+# Anti-Crossfire: Traffic mirroring to analyze attack patterns
+# Mirror catalogue traffic to monitoring service
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: catalogue-mirror-vs
+  namespace: sock-shop
+spec:
+  hosts:
+  - catalogue.sock-shop.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: catalogue.sock-shop.svc.cluster.local
+        port:
+          number: 80
+      weight: 100
+    mirror:
+      host: attack-monitor.sock-shop.svc.cluster.local  # Custom monitoring service
+      port:
+        number: 80
+    mirrorPercentage:
+      value: 10.0                   # Mirror 10% for analysis
+    timeout: 5s
+    retries:
+      attempts: 1
+      perTryTimeout: 2s
+      retryOn: 5xx,reset
