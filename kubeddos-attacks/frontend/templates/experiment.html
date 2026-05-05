@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+{% block title %}KubeDDoS — Experiment Runner{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+  <div class="col">
+    <h4><i class="bi bi-play-btn"></i> Experiment Runner</h4>
+    <p class="text-muted">Run the 3-scenario DDoS comparison (Baseline → Native K8s → KubeDDoS) with background legitimate
+      traffic. Results are streamed live and saved for later review.</p>
+  </div>
+  <div class="col-auto d-flex align-items-center gap-2">
+    <span id="health-badge" class="badge bg-secondary">Checking…</span>
+    <a href="http://{{ request.host.split(':')[0] }}:31300" target="_blank" class="btn btn-sm btn-outline-info">
+      <i class="bi bi-graph-up"></i> Grafana
+    </a>
+  </div>
+</div>
+
+<!-- Row 1: Config + Terminal -->
+<div class="row g-3 mb-3">
+
+  <!-- Config -->
+  <div class="col-lg-4">
+    <div class="card bg-dark border-secondary mb-3">
+      <div class="card-header"><h6 class="mb-0"><i class="bi bi-sliders"></i> Scenario Configuration</h6></div>
+      <div class="card-body">
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label small text-muted">Attack Duration (s)</label>
+            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
+              id="cfg-duration" value="120" min="30" max="3600">
+          </div>
+          <div class="col-6">
+            <label class="form-label small text-muted">Attack Workers</label>
+            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
+              id="cfg-workers" value="80" min="1" max="500">
+          </div>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label small text-muted">Attack Rate (req/s per worker)</label>
+            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
+              id="cfg-rate" value="20" min="1" max="200">
+          </div>
+          <div class="col-6">
+            <label class="form-label small text-muted">BG Workers</label>
+            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
+              id="cfg-bg-workers" value="15" min="0" max="100">
+          </div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label small text-muted">BG Rate (req/s per worker)</label>
+            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary"
+              id="cfg-bg-rate" value="3" min="1" max="50">
+          </div>
+          <div class="col-6 d-flex align-items-end">
+            <small class="text-muted">Total attack: <span id="cfg-total-rate">1600</span> req/s<br>
+              BG traffic: <span id="cfg-bg-total">45</span> req/s</small>
+          </div>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-danger flex-fill" id="btn-run" onclick="runExperiment()">
+            <i class="bi bi-play-circle"></i> Run Experiment
+          </button>
+          <button class="btn btn-outline-secondary" id="btn-stop" onclick="stopExperiment()" disabled>
+            <i class="bi bi-stop-circle"></i> Stop
+          </button>
+        </div>
+        <div id="run-error" class="alert alert-danger mt-2 d-none small py-2"></div>
+      </div>
+    </div>
+
+    <!-- Phase progress -->
+    <div class="card bg-dark border-secondary">
+      <div class="card-header"><h6 class="mb-0"><i class="bi bi-diagram-3"></i> Scenario Progress</h6></div>
+      <div class="card-body p-3">
+        <div class="d-flex flex-column gap-2">
+          <div class="phase-step" id="phase-baseline">
+            <div class="d-flex align-items-center gap-2">
+              <span class="phase-icon text-secondary"><i class="bi bi-circle"></i></span>
+              <div>
+                <div class="fw-bold">Phase 1: Baseline</div>
+                <small class="text-muted">No mitigations — raw attack impact</small>
+              </div>
+            </div>
+          </div>
+          <div class="text-secondary text-center" style="font-size:0.8rem">↓</div>
+          <div class="phase-step" id="phase-native">
+            <div class="d-flex align-items-center gap-2">
+              <span class="phase-icon text-secondary"><i class="bi bi-circle"></i></span>
+              <div>
+                <div class="fw-bold">Phase 2: Native K8s</div>
+                <small class="text-muted">NetworkPolicies only — limited protection</small>
+              </div>
+            </div>
+          </div>
+          <div class="text-secondary text-center" style="font-size:0.8rem">↓</div>
+          <div class="phase-step" id="phase-nephio">
+            <div class="d-flex align-items-center gap-2">
+              <span class="phase-icon text-secondary"><i class="bi bi-circle"></i></span>
+              <div>
+                <div class="fw-bold">Phase 3: KubeDDoS</div>
+                <small class="text-muted">NetworkPolicies + HPAs + PriorityClasses</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="elapsed-display" class="text-muted small mt-3 d-none">
+          <i class="bi bi-clock"></i> Elapsed: <span id="elapsed-time">0s</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live terminal -->
+  <div class="col-lg-8">
+    <div class="card bg-dark border-secondary h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-terminal"></i> Live Output</h6>
+        <div class="d-flex gap-2 align-items-center">
+          <span class="badge" id="terminal-status-badge" style="background:#444">Idle</span>
+          <button class="btn btn-sm btn-outline-secondary py-0" onclick="clearTerminal()">Clear</button>
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="auto-scroll" checked>
+            <label class="form-check-label small" for="auto-scroll">Auto-scroll</label>
+          </div>
+        </div>
+      </div>
+      <div class="card-body p-0" style="height:460px">
+        <pre id="terminal" class="m-0 p-3 text-success bg-black small"
+          style="height:100%;overflow-y:auto;font-family:monospace;white-space:pre-wrap;word-break:break-word">Waiting for experiment to start…</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Live metrics comparison (shown once at least one phase has data) -->
+<div class="card bg-dark border-secondary mb-3" id="metrics-card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h6 class="mb-0"><i class="bi bi-bar-chart"></i> Live Metrics Comparison — During Attack</h6>
+    <span class="text-muted small">Updates after each phase attack completes</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-dark table-bordered table-sm mb-0 text-center">
+        <thead class="table-secondary">
+          <tr>
+            <th class="text-start ps-3">Metric</th>
+            <th>🔴 Baseline<br><small class="text-muted fw-normal">No mitigations</small></th>
+            <th>🟡 Native K8s<br><small class="text-muted fw-normal">NetworkPolicies only</small></th>
+            <th>🟢 KubeDDoS<br><small class="text-muted fw-normal">Full Nephio stack</small></th>
+          </tr>
+        </thead>
+        <tbody id="metrics-table-body">
+          <tr><td colspan="4" class="text-muted py-4">No data yet — run an experiment to see results</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Grafana quick links -->
+<div class="card bg-dark border-info mb-3">
+  <div class="card-body py-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <span class="text-info fw-bold"><i class="bi bi-graph-up-arrow"></i> Grafana Dashboards:</span>
+      <a href="http://{{ request.host.split(':')[0] }}:31300/d/sock-shop-perf" target="_blank"
+        class="btn btn-sm btn-outline-info">Sock Shop Performance</a>
+      <a href="http://{{ request.host.split(':')[0] }}:31300/d/sock-shop-resources" target="_blank"
+        class="btn btn-sm btn-outline-info">Resource Usage</a>
+      <a href="http://{{ request.host.split(':')[0] }}:31300" target="_blank"
+        class="btn btn-sm btn-outline-secondary">All Dashboards</a>
+      <span class="text-muted small ms-auto">Tip: set time range to "Last 30 minutes" during experiments</span>
+    </div>
+  </div>
+</div>
+
+<!-- Previous results browser -->
+<div class="card bg-dark border-secondary">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h6 class="mb-0"><i class="bi bi-archive"></i> Saved Results</h6>
+    <button class="btn btn-sm btn-outline-secondary" onclick="loadResultsList()">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label small text-muted">Select run</label>
+        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="results-select"
+          onchange="loadResultDetail(this.value)">
+          <option value="">— select a saved run —</option>
+        </select>
+      </div>
+      <div class="col-md-8">
+        <div id="saved-results-panel">
+          <p class="text-muted small">Select a saved run to view its comparison table.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.phase-step { padding: 8px 10px; border-radius: 6px; border: 1px solid #444; transition: all 0.3s; }
+.phase-step.active { border-color: #ffc107; background: rgba(255,193,7,0.08); }
+.phase-step.done { border-color: #198754; background: rgba(25,135,84,0.08); }
+.phase-step.active .phase-icon { color: #ffc107 !important; }
+.phase-step.done .phase-icon { color: #198754 !important; }
+</style>
+<script>
+const socket = io();
+let experimentRunning = false;
+let startTime = null;
+let elapsedInterval = null;
+let currentPhase = 'idle';
+const liveMetrics = {};
+
+// ── WebSocket events ────────────────────────────────────────────────
+socket.on('experiment_log', ({ line, phase }) => {
+  appendTerminal(line);
+  if (phase && phase !== currentPhase) {
+    setPhase(phase);
+  }
+  // Parse phase from echo lines too
+  if (line.includes('PHASE 1:') || line.includes('###PHASE:baseline###')) setPhase('baseline');
+  if (line.includes('PHASE 2:') || line.includes('###PHASE:native###')) setPhase('native');
+  if (line.includes('PHASE 3:') || line.includes('###PHASE:nephio###')) setPhase('nephio');
+});
+
+socket.on('experiment_done', ({ returncode, results_dir, phase }) => {
+  appendTerminal(`\n[DONE] Experiment finished (exit code: ${returncode})`);
+  if (returncode === 0) {
+    appendTerminal('[DONE] Results saved to: ' + results_dir);
+    appendTerminal('[DONE] Load saved results below to view the comparison table.');
+  } else {
+    appendTerminal('[ERROR] Experiment exited with errors.');
+  }
+  setRunning(false);
+  phasesDone();
+  loadResultsList();
+  if (results_dir) {
+    const name = results_dir.split('/').pop();
+    setTimeout(() => loadResultDetail(name), 500);
+  }
+});
+
+// ── UI helpers ──────────────────────────────────────────────────────
+function appendTerminal(line) {
+  const t = document.getElementById('terminal');
+  if (t.textContent === 'Waiting for experiment to start…') t.textContent = '';
+  t.textContent += line + '\n';
+  if (document.getElementById('auto-scroll').checked) {
+    t.scrollTop = t.scrollHeight;
+  }
+}
+
+function clearTerminal() {
+  document.getElementById('terminal').textContent = 'Cleared.';
+}
+
+function setPhase(phase) {
+  currentPhase = phase;
+  ['baseline', 'native', 'nephio'].forEach(p => {
+    const el = document.getElementById('phase-' + p);
+    if (!el) return;
+    el.classList.remove('active', 'done');
+    const icon = el.querySelector('.phase-icon i');
+    if (phase === p) {
+      el.classList.add('active');
+      icon.className = 'bi bi-arrow-right-circle-fill';
+    } else if (['baseline', 'native', 'nephio'].indexOf(p) < ['baseline', 'native', 'nephio'].indexOf(phase)) {
+      el.classList.add('done');
+      icon.className = 'bi bi-check-circle-fill';
+    } else {
+      icon.className = 'bi bi-circle';
+    }
+  });
+  updateBadge(phase);
+}
+
+function phasesDone() {
+  ['baseline', 'native', 'nephio'].forEach(p => {
+    const el = document.getElementById('phase-' + p);
+    if (!el) return;
+    el.classList.remove('active');
+    el.classList.add('done');
+    const icon = el.querySelector('.phase-icon i');
+    icon.className = 'bi bi-check-circle-fill';
+  });
+  updateBadge('complete');
+}
+
+function updateBadge(phase) {
+  const badge = document.getElementById('terminal-status-badge');
+  const labels = {
+    idle: ['Idle', '#444'],
+    starting: ['Starting', '#0d6efd'],
+    baseline: ['Phase 1: Baseline', '#dc3545'],
+    native: ['Phase 2: Native K8s', '#ffc107'],
+    nephio: ['Phase 3: KubeDDoS', '#198754'],
+    complete: ['Complete', '#198754'],
+    error: ['Error', '#dc3545'],
+    stopped: ['Stopped', '#6c757d'],
+  };
+  const [text, color] = labels[phase] || ['Running', '#0d6efd'];
+  badge.textContent = text;
+  badge.style.background = color;
+}
+
+function setRunning(running) {
+  experimentRunning = running;
+  document.getElementById('btn-run').disabled = running;
+  document.getElementById('btn-stop').disabled = !running;
+  if (running) {
+    startTime = Date.now();
+    document.getElementById('elapsed-display').classList.remove('d-none');
+    elapsedInterval = setInterval(() => {
+      const s = Math.round((Date.now() - startTime) / 1000);
+      document.getElementById('elapsed-time').textContent = s + 's';
+    }, 1000);
+  } else {
+    clearInterval(elapsedInterval);
+  }
+}
+
+// ── Rate calculator ─────────────────────────────────────────────────
+function updateRateDisplays() {
+  const w = +document.getElementById('cfg-workers').value || 0;
+  const r = +document.getElementById('cfg-rate').value || 0;
+  const bw = +document.getElementById('cfg-bg-workers').value || 0;
+  const br = +document.getElementById('cfg-bg-rate').value || 0;
+  document.getElementById('cfg-total-rate').textContent = (w * r).toLocaleString();
+  document.getElementById('cfg-bg-total').textContent = (bw * br).toLocaleString();
+}
+['cfg-workers','cfg-rate','cfg-bg-workers','cfg-bg-rate'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updateRateDisplays);
+});
+updateRateDisplays();
+
+// ── Experiment control ──────────────────────────────────────────────
+async function runExperiment() {
+  if (experimentRunning) return;
+  clearTerminal();
+  setPhase('starting');
+  updateBadge('starting');
+
+  const body = {
+    duration: +document.getElementById('cfg-duration').value,
+    workers: +document.getElementById('cfg-workers').value,
+    rate: +document.getElementById('cfg-rate').value,
+    bg_workers: +document.getElementById('cfg-bg-workers').value,
+    bg_rate: +document.getElementById('cfg-bg-rate').value,
+  };
+
+  const errEl = document.getElementById('run-error');
+  errEl.classList.add('d-none');
+
+  try {
+    const resp = await fetch('/api/experiment/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      errEl.textContent = data.error || 'Failed to start';
+      errEl.classList.remove('d-none');
+      updateBadge('idle');
+      return;
+    }
+    setRunning(true);
+    appendTerminal('[INFO] Experiment started. Streaming output below…\n');
+  } catch (e) {
+    errEl.textContent = 'Network error: ' + e.message;
+    errEl.classList.remove('d-none');
+    updateBadge('idle');
+  }
+}
+
+async function stopExperiment() {
+  if (!experimentRunning) return;
+  await fetch('/api/experiment/stop', {method: 'POST'});
+  appendTerminal('\n[STOPPED] Stop signal sent.');
+  setRunning(false);
+  updateBadge('stopped');
+}
+
+// ── Health check ────────────────────────────────────────────────────
+async function checkHealth() {
+  const badge = document.getElementById('health-badge');
+  badge.textContent = 'Checking…';
+  badge.className = 'badge bg-secondary';
+  try {
+    const r = await fetch('/api/experiment/health');
+    const d = await r.json();
+    const ss = d.checks.sock_shop;
+    const ssText = (ss && ss.running !== undefined)
+      ? `Sock Shop: ${ss.running}/${ss.total} pods`
+      : 'Sock Shop: ?';
+    if (d.healthy) {
+      badge.textContent = '✓ Cluster healthy — ' + ssText;
+      badge.className = 'badge bg-success';
+    } else {
+      const issues = [];
+      if (d.checks.cluster !== 'ok') issues.push('cluster down');
+      if (!d.checks.sock_shop_ok) issues.push(ssText + ' (need ≥8)');
+      if (d.checks.prometheus === 'error') issues.push('Prometheus unreachable');
+      badge.textContent = '⚠ ' + issues.join(', ');
+      badge.className = 'badge bg-warning text-dark';
+    }
+  } catch (e) {
+    badge.textContent = 'Health check failed';
+    badge.className = 'badge bg-danger';
+  }
+}
+
+// ── Results helpers ─────────────────────────────────────────────────
+function metricRow(label, baseVal, nativeVal, nephioVal, lowerBetter = true, unit = '') {
+  const vals = [parseFloat(baseVal), parseFloat(nativeVal), parseFloat(nephioVal)];
+  const valid = vals.filter(v => !isNaN(v));
+  if (!valid.length) return `<tr><td class="ps-3 text-start">${label}</td><td colspan="3" class="text-muted">N/A</td></tr>`;
+
+  const best = lowerBetter ? Math.min(...valid) : Math.max(...valid);
+  const worst = lowerBetter ? Math.max(...valid) : Math.min(...valid);
+
+  function cell(v) {
+    if (isNaN(v)) return '<td class="text-muted">—</td>';
+    const disp = (unit === '%') ? v.toFixed(1) + '%' : (unit === 's') ? v.toFixed(3) + 's' : v + unit;
+    let cls = '';
+    if (v === best) cls = 'text-success fw-bold';
+    else if (v === worst) cls = 'text-danger';
+    else cls = 'text-warning';
+    return `<td class="${cls}">${disp}</td>`;
+  }
+
+  return `<tr>
+    <td class="ps-3 text-start text-muted">${label}</td>
+    ${cell(vals[0])}${cell(vals[1])}${cell(vals[2])}
+  </tr>`;
+}
+
+function renderMetricsTable(m) {
+  const get = (scenario, phase, key) => {
+    const d = m[`${scenario}_${phase}`];
+    return d ? d[key] : null;
+  };
+
+  const scenarios = ['baseline', 'native', 'nephio'];
+  const phases_to_show = ['during'];  // focus on mid-attack snapshot
+
+  let html = '';
+
+  // Check which phases have data
+  const hasDuring = scenarios.some(s => m[`${s}_during`]);
+  const hasPre = scenarios.some(s => m[`${s}_pre`]);
+
+  if (hasDuring || hasPre) {
+    const ph = hasDuring ? 'during' : 'pre';
+    const label = hasDuring ? 'Mid-Attack Snapshot' : 'Pre-Attack Baseline';
+
+    html += `<tr class="table-secondary"><td colspan="4" class="ps-3 fw-bold">${label}</td></tr>`;
+    html += metricRow('Avg Response Time',
+      get('baseline', ph, 'response_time_avg_s'),
+      get('native', ph, 'response_time_avg_s'),
+      get('nephio', ph, 'response_time_avg_s'), true, 's');
+    html += metricRow('Error Rate',
+      get('baseline', ph, 'error_rate_pct'),
+      get('native', ph, 'error_rate_pct'),
+      get('nephio', ph, 'error_rate_pct'), true, '%');
+    html += metricRow('Running Pods',
+      get('baseline', ph, 'pods'),
+      get('native', ph, 'pods'),
+      get('nephio', ph, 'pods'), false, '');
+    html += metricRow('HPAs Active',
+      get('baseline', ph, 'hpa_count'),
+      get('native', ph, 'hpa_count'),
+      get('nephio', ph, 'hpa_count'), false, '');
+    html += metricRow('Network Policies',
+      get('baseline', ph, 'network_policies'),
+      get('native', ph, 'network_policies'),
+      get('nephio', ph, 'network_policies'), false, '');
+    html += metricRow('CPU (services, mc)',
+      get('baseline', ph, 'cpu_services_mcores'),
+      get('native', ph, 'cpu_services_mcores'),
+      get('nephio', ph, 'cpu_services_mcores'), true, '');
+    html += metricRow('Memory (services, MB)',
+      get('baseline', ph, 'memory_services_mb'),
+      get('native', ph, 'memory_services_mb'),
+      get('nephio', ph, 'memory_services_mb'), true, '');
+  }
+
+  const tbody = document.getElementById('metrics-table-body');
+  tbody.innerHTML = html || '<tr><td colspan="4" class="text-muted py-4">No data yet</td></tr>';
+}
+
+async function loadResultsList() {
+  const r = await fetch('/api/experiment/results');
+  const d = await r.json();
+  const sel = document.getElementById('results-select');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— select a saved run —</option>';
+  (d.results || []).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === prev) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadResultDetail(name) {
+  if (!name) return;
+  const panel = document.getElementById('saved-results-panel');
+  panel.innerHTML = '<span class="text-muted small">Loading…</span>';
+
+  const r = await fetch('/api/experiment/results/' + encodeURIComponent(name));
+  if (!r.ok) {
+    panel.innerHTML = '<span class="text-danger small">Failed to load results.</span>';
+    return;
+  }
+  const d = await r.json();
+
+  // Also update the live metrics table
+  renderMetricsTable(d.metrics || {});
+
+  // Render summary in saved panel
+  const scenarios = ['baseline', 'native', 'nephio'];
+  const ph = 'during';
+  const get = (s, k) => { const x = d.metrics[`${s}_${ph}`]; return x ? x[k] : null; };
+  const fmt = v => v != null ? v : '—';
+
+  panel.innerHTML = `
+    <div class="mb-2 text-info small fw-bold">Run: ${d.name}</div>
+    <div class="table-responsive">
+    <table class="table table-dark table-bordered table-sm small mb-2 text-center">
+      <thead class="table-secondary">
+        <tr>
+          <th class="text-start ps-2">Metric</th>
+          <th>🔴 Baseline</th>
+          <th>🟡 Native K8s</th>
+          <th>🟢 KubeDDoS</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="text-start ps-2 text-muted">Response (s)</td>
+          <td>${fmt(get('baseline','response_time_avg_s'))}</td>
+          <td>${fmt(get('native','response_time_avg_s'))}</td>
+          <td>${fmt(get('nephio','response_time_avg_s'))}</td></tr>
+        <tr><td class="text-start ps-2 text-muted">Error Rate</td>
+          <td>${fmt(get('baseline','error_rate_pct'))}%</td>
+          <td>${fmt(get('native','error_rate_pct'))}%</td>
+          <td>${fmt(get('nephio','error_rate_pct'))}%</td></tr>
+        <tr><td class="text-start ps-2 text-muted">Pods Running</td>
+          <td>${fmt(get('baseline','pods'))}</td>
+          <td>${fmt(get('native','pods'))}</td>
+          <td>${fmt(get('nephio','pods'))}</td></tr>
+        <tr><td class="text-start ps-2 text-muted">HPAs</td>
+          <td>${fmt(get('baseline','hpa_count'))}</td>
+          <td>${fmt(get('native','hpa_count'))}</td>
+          <td>${fmt(get('nephio','hpa_count'))}</td></tr>
+        <tr><td class="text-start ps-2 text-muted">Net Policies</td>
+          <td>${fmt(get('baseline','network_policies'))}</td>
+          <td>${fmt(get('native','network_policies'))}</td>
+          <td>${fmt(get('nephio','network_policies'))}</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <details class="mt-1">
+      <summary class="text-muted small" style="cursor:pointer">View full summary.md</summary>
+      <pre class="bg-black text-light small p-2 mt-1 rounded" style="max-height:300px;overflow:auto">${escHtml(d.summary)}</pre>
+    </details>
+  `;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Sync status on (re)connect ──────────────────────────────────────
+socket.on('connect', async () => {
+  const r = await fetch('/api/experiment/status');
+  const d = await r.json();
+  if (d.running) {
+    setRunning(true);
+    setPhase(d.phase);
+    appendTerminal('[INFO] Experiment in progress — reconnected. Streaming resumes…\n');
+    // Back-fill logs
+    const lr = await fetch('/api/experiment/logs?offset=0');
+    const ld = await lr.json();
+    document.getElementById('terminal').textContent = '';
+    ld.lines.forEach(l => appendTerminal(l));
+  }
+});
+
+// ── Init ────────────────────────────────────────────────────────────
+checkHealth();
+loadResultsList();
+setInterval(checkHealth, 30000);
+</script>
+{% endblock %}

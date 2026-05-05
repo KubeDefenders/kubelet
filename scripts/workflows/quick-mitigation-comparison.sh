@@ -14,9 +14,12 @@ NC='\033[0m'
 
 # Configuration
 NAMESPACE="sock-shop"
-ATTACK_DURATION="${ATTACK_DURATION:-60}"  # 1 minute
-ATTACK_WORKERS="${ATTACK_WORKERS:-50}"
+ATTACK_DURATION="${ATTACK_DURATION:-120}"  # 2 minutes
+ATTACK_WORKERS="${ATTACK_WORKERS:-80}"
 ATTACK_RATE="${ATTACK_RATE:-20}"
+BACKGROUND_WORKERS="${BACKGROUND_WORKERS:-15}"
+BACKGROUND_RATE="${BACKGROUND_RATE:-3}"
+BACKGROUND_TRAFFIC_PID=""
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RESULTS_DIR="$PROJECT_ROOT/results/experiments/quick-comparison-$(date +%Y%m%d-%H%M%S)"
 
@@ -35,6 +38,44 @@ echo "Target: $TARGET_URL"
 echo ""
 
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
+
+# Background traffic — simulate real users alongside the attack
+start_background_traffic() {
+    echo "  [BG] Starting background normal traffic (${BACKGROUND_WORKERS} workers @ ${BACKGROUND_RATE} req/s each)..."
+    _BG_URL="$TARGET_URL" _BG_W="$BACKGROUND_WORKERS" _BG_R="$BACKGROUND_RATE" \
+    python3 -c "
+import requests, time, threading, signal, os
+url = os.environ['_BG_URL']
+w = int(os.environ.get('_BG_W', '15'))
+rate = float(os.environ.get('_BG_R', '3'))
+stop = [False]
+def worker():
+    s = requests.Session()
+    while not stop[0]:
+        try: s.get(url, timeout=3)
+        except: pass
+        time.sleep(1.0 / rate)
+threads = [threading.Thread(target=worker, daemon=True) for _ in range(w)]
+[t.start() for t in threads]
+def sig(s,f): stop[0] = True
+signal.signal(signal.SIGTERM, sig)
+signal.signal(signal.SIGINT, sig)
+while not stop[0]: time.sleep(0.5)
+[t.join(timeout=2) for t in threads]
+" &
+    BACKGROUND_TRAFFIC_PID=$!
+    echo "  [BG] Background traffic started (PID: $BACKGROUND_TRAFFIC_PID)"
+}
+
+stop_background_traffic() {
+    if [ -n "${BACKGROUND_TRAFFIC_PID:-}" ]; then
+        echo "  [BG] Stopping background traffic (PID: $BACKGROUND_TRAFFIC_PID)..."
+        kill "$BACKGROUND_TRAFFIC_PID" 2>/dev/null || true
+        wait "$BACKGROUND_TRAFFIC_PID" 2>/dev/null || true
+        BACKGROUND_TRAFFIC_PID=""
+    fi
+}
+trap 'stop_background_traffic' EXIT INT TERM
 
 # Query Prometheus and return a single float value (sum over results)
 prom_query_sum() {
@@ -167,29 +208,39 @@ print(f'Total requests: {sum(results)}')
     sleep 30
 }
 
-# Deploy native mitigations
+# Deploy native mitigations — NetworkPolicies ONLY, deliberately no HPAs/ResourceQuotas.
+# Without autoscaling, pods still get overwhelmed under heavy attack load,
+# which is the key differentiator vs KubeDDoS which adds HPAs + PriorityClasses.
 deploy_native() {
-    echo -e "${CYAN}Deploying Native Kubernetes mitigations...${NC}"
+    echo -e "${CYAN}Deploying Native Kubernetes mitigations (NetworkPolicies only)...${NC}"
+    echo "  Note: intentionally no HPAs — pods cannot scale to absorb load"
     
-    kubectl apply -f "$PROJECT_ROOT/mitigation/kubernetes-native/network-policies/" 2>&1 | head -5
-    kubectl apply -f "$PROJECT_ROOT/mitigation/kubernetes-native/autoscaling/" 2>&1 | head -5
-    kubectl apply -f "$PROJECT_ROOT/mitigation/kubernetes-native/resource-quotas/" 2>&1 | head -5
+    kubectl apply -f "$PROJECT_ROOT/mitigation/kubernetes-native/network-policies/" 2>&1
     
-    echo "Waiting 30s for mitigations to activate..."
-    sleep 30
+    echo "Waiting 20s for NetworkPolicies to activate..."
+    sleep 20
 }
 
-# Deploy nephio mitigations
+# Deploy KubeDDoS (Nephio) mitigations.
+# Removes native-only policies first, then applies the full Nephio stack:
+# PriorityClasses + NetworkPolicies + ResourceQuotas + HPAs.
+# HPAs allow pods to scale under load; PriorityClasses ensure critical services
+# (payment, orders) are scheduled first when resources are constrained.
 deploy_nephio() {
-    echo -e "${CYAN}Deploying Nephio mitigations...${NC}"
+    echo -e "${CYAN}Deploying KubeDDoS (Nephio) full stack...${NC}"
+    echo "  Removing native-only policies to start clean..."
+    kubectl delete networkpolicies,hpa,resourcequotas --all -n "$NAMESPACE" \
+        --ignore-not-found=true 2>/dev/null || true
+    sleep 5
     
+    echo "  Applying Nephio stack (PriorityClasses + NetworkPolicies + ResourceQuotas + HPAs)..."
     if [ -f "$PROJECT_ROOT/mitigation/nephio/deploy.sh" ]; then
-        bash "$PROJECT_ROOT/mitigation/nephio/deploy.sh" 2>&1 | head -20
+        bash "$PROJECT_ROOT/mitigation/nephio/deploy.sh" 2>&1 | head -30
     else
         kubectl apply -f "$PROJECT_ROOT/mitigation/nephio/translated/" 2>&1 | head -10
     fi
     
-    echo "Waiting 30s for Nephio mitigations to activate..."
+    echo "Waiting 30s for KubeDDoS mitigations to activate and HPAs to stabilise..."
     sleep 30
 }
 
@@ -204,25 +255,33 @@ cleanup_all() {
 # EXPERIMENT
 #=============================================================================
 
+# Start background legitimate traffic — runs across all three phases
+start_background_traffic
+
 echo -e "${GREEN}=== PHASE 1: BASELINE (No Mitigations) ===${NC}"
+echo "###PHASE:baseline###"
 cleanup_all
 collect_metrics "baseline-pre" "$RESULTS_DIR/metrics-pre-baseline.json"
 run_attack "baseline" "$RESULTS_DIR/attack-baseline.log"
 collect_metrics "baseline-post" "$RESULTS_DIR/metrics-post-baseline.json"
 
 echo ""
-echo -e "${GREEN}=== PHASE 2: NATIVE KUBERNETES MITIGATIONS ===${NC}"
+echo -e "${GREEN}=== PHASE 2: NATIVE KUBERNETES MITIGATIONS (NetworkPolicies only) ===${NC}"
+echo "###PHASE:native###"
 deploy_native
 collect_metrics "native-pre" "$RESULTS_DIR/metrics-pre-native.json"
 run_attack "native" "$RESULTS_DIR/attack-native.log"
 collect_metrics "native-post" "$RESULTS_DIR/metrics-post-native.json"
 
 echo ""
-echo -e "${GREEN}=== PHASE 3: NEPHIO MITIGATIONS ===${NC}"
+echo -e "${GREEN}=== PHASE 3: KUBEDDOS (Nephio full stack — NetworkPolicies + HPAs + PriorityClasses) ===${NC}"
+echo "###PHASE:nephio###"
 deploy_nephio
 collect_metrics "nephio-pre" "$RESULTS_DIR/metrics-pre-nephio.json"
 run_attack "nephio" "$RESULTS_DIR/attack-nephio.log"
 collect_metrics "nephio-post" "$RESULTS_DIR/metrics-post-nephio.json"
+
+stop_background_traffic
 
 #=============================================================================
 # GENERATE SUMMARY TABLE
@@ -271,6 +330,7 @@ cat "$RESULTS_DIR/summary.md"
 echo ""
 echo -e "${GREEN}Experiment complete!${NC}"
 echo "Results saved to: $RESULTS_DIR"
+echo "###COMPLETE:$RESULTS_DIR###"
 echo ""
 echo "View summary:"
 echo "  cat $RESULTS_DIR/summary.md"

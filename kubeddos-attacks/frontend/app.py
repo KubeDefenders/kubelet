@@ -8,6 +8,7 @@ metrics monitoring through a web interface.
 
 import json
 import os
+import re
 import subprocess
 import signal
 import sys
@@ -35,6 +36,20 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 active_processes: dict = {}  # id -> {process, config, start_time, metrics}
 discovery_result: dict = {}  # Latest discovery result
 attack_history: list = []    # Completed attacks
+
+# Experiment state
+PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
+_exp_lock = threading.Lock()
+_exp: dict = {
+    "running": False,
+    "process": None,
+    "logs": [],
+    "phase": "idle",
+    "started_at": None,
+    "results_dir": None,
+    "config": {},
+    "return_code": None,
+}
 
 
 # ── Helpers ────────────────────────────────────────────────────────
@@ -127,6 +142,12 @@ def execute_page():
 def results_page():
     """Attack results and history page."""
     return render_template("results.html", config=config)
+
+
+@app.route("/experiment")
+def experiment_page():
+    """Experiment runner — control 3-scenario DDoS comparison tests."""
+    return render_template("experiment.html", config=config)
 
 
 # ── API Routes ─────────────────────────────────────────────────────
@@ -365,6 +386,231 @@ def api_attack_history():
     return jsonify({"history": attack_history})
 
 
+# -- Experiment Runner API --
+
+def _ansi_strip(text: str) -> str:
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
+
+
+def _stream_experiment(proc):
+    """Background thread: stream experiment stdout via WebSocket and parse markers."""
+    PHASE_MAP = {
+        "###PHASE:baseline###": "baseline",
+        "###PHASE:native###": "native",
+        "###PHASE:nephio###": "nephio",
+    }
+    for raw in proc.stdout:
+        line = _ansi_strip(raw.rstrip())
+        with _exp_lock:
+            _exp["logs"].append(line)
+            if len(_exp["logs"]) > 3000:
+                _exp["logs"] = _exp["logs"][-3000:]
+            for marker, phase in PHASE_MAP.items():
+                if marker in line or marker in raw:
+                    _exp["phase"] = phase
+            if "###COMPLETE:" in line:
+                rdir = line.split("###COMPLETE:")[-1].strip().strip("#")
+                _exp["results_dir"] = rdir
+        socketio.emit("experiment_log", {"line": line, "phase": _exp.get("phase", "")})
+
+    proc.wait()
+    with _exp_lock:
+        _exp["running"] = False
+        _exp["return_code"] = proc.returncode
+        _exp["phase"] = "complete" if proc.returncode == 0 else "error"
+    socketio.emit("experiment_done", {
+        "returncode": proc.returncode,
+        "results_dir": _exp.get("results_dir"),
+        "phase": _exp["phase"],
+    })
+
+
+@app.route("/api/experiment/run", methods=["POST"])
+def api_experiment_run():
+    """Start the 3-scenario mitigation comparison experiment."""
+    with _exp_lock:
+        if _exp["running"]:
+            return jsonify({"error": "Experiment already running"}), 409
+
+    body = request.get_json(silent=True) or {}
+    duration = int(body.get("duration", 120))
+    workers = int(body.get("workers", 80))
+    rate = int(body.get("rate", 20))
+    bg_workers = int(body.get("bg_workers", 15))
+    bg_rate = int(body.get("bg_rate", 3))
+
+    script = Path(PROJECT_ROOT) / "scripts" / "workflows" / "quick-mitigation-comparison.sh"
+    if not script.exists():
+        return jsonify({"error": f"Script not found: {script}"}), 404
+
+    env = os.environ.copy()
+    env.update({
+        "ATTACK_DURATION": str(duration),
+        "ATTACK_WORKERS": str(workers),
+        "ATTACK_RATE": str(rate),
+        "BACKGROUND_WORKERS": str(bg_workers),
+        "BACKGROUND_RATE": str(bg_rate),
+        "PROMETHEUS_URL": os.environ.get("PROMETHEUS_URL", "http://localhost:9090"),
+    })
+
+    try:
+        proc = subprocess.Popen(
+            ["bash", str(script)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=PROJECT_ROOT,
+            env=env,
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    with _exp_lock:
+        _exp["running"] = True
+        _exp["process"] = proc
+        _exp["logs"] = []
+        _exp["phase"] = "starting"
+        _exp["started_at"] = datetime.utcnow().isoformat() + "Z"
+        _exp["results_dir"] = None
+        _exp["return_code"] = None
+        _exp["config"] = {
+            "duration": duration, "workers": workers, "rate": rate,
+            "bg_workers": bg_workers, "bg_rate": bg_rate,
+        }
+
+    t = threading.Thread(target=_stream_experiment, args=(proc,), daemon=True)
+    t.start()
+    return jsonify({"status": "started", "config": _exp["config"]})
+
+
+@app.route("/api/experiment/stop", methods=["POST"])
+def api_experiment_stop():
+    """Terminate a running experiment."""
+    with _exp_lock:
+        proc = _exp.get("process")
+        if not proc or not _exp["running"]:
+            return jsonify({"error": "No experiment running"}), 404
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    with _exp_lock:
+        _exp["running"] = False
+        _exp["phase"] = "stopped"
+    return jsonify({"status": "stopped"})
+
+
+@app.route("/api/experiment/status")
+def api_experiment_status():
+    """Get current experiment status."""
+    with _exp_lock:
+        return jsonify({
+            "running": _exp["running"],
+            "phase": _exp["phase"],
+            "started_at": _exp["started_at"],
+            "results_dir": _exp["results_dir"],
+            "return_code": _exp["return_code"],
+            "log_lines": len(_exp["logs"]),
+            "config": _exp.get("config", {}),
+        })
+
+
+@app.route("/api/experiment/logs")
+def api_experiment_logs():
+    """Get buffered experiment logs with optional offset for polling."""
+    offset = max(0, int(request.args.get("offset", 0)))
+    with _exp_lock:
+        lines = _exp["logs"][offset:]
+        total = len(_exp["logs"])
+    return jsonify({"lines": lines, "total": total + offset, "offset": offset + len(lines)})
+
+
+@app.route("/api/experiment/results")
+def api_experiment_results_list():
+    """List all saved experiment result directories."""
+    results_base = Path(PROJECT_ROOT) / "results" / "experiments"
+    if not results_base.exists():
+        return jsonify({"results": []})
+    dirs = sorted(
+        [d.name for d in results_base.iterdir()
+         if d.is_dir() and (d / "summary.md").exists()],
+        reverse=True,
+    )
+    return jsonify({"results": dirs})
+
+
+@app.route("/api/experiment/results/<name>")
+def api_experiment_results_detail(name):
+    """Return parsed metrics and summary for a specific experiment run."""
+    # Prevent path traversal
+    if "/" in name or ".." in name or not name.replace("-", "").replace("_", "").isalnum():
+        return jsonify({"error": "Invalid result name"}), 400
+    results_dir = Path(PROJECT_ROOT) / "results" / "experiments" / name
+    if not results_dir.exists():
+        return jsonify({"error": "Not found"}), 404
+
+    metrics: dict = {}
+    for scenario in ("baseline", "native", "nephio"):
+        for phase in ("pre", "during", "post"):
+            f = results_dir / f"metrics-{phase}-{scenario}.json"
+            if f.exists():
+                try:
+                    with open(f) as fp:
+                        metrics[f"{scenario}_{phase}"] = json.load(fp)
+                except Exception:
+                    pass
+
+    summary_file = results_dir / "summary.md"
+    summary_text = summary_file.read_text() if summary_file.exists() else ""
+    return jsonify({"name": name, "summary": summary_text, "metrics": metrics})
+
+
+@app.route("/api/experiment/health")
+def api_experiment_health():
+    """Quick health check: cluster, Sock Shop pods, Prometheus."""
+    import requests as req
+    checks: dict = {}
+
+    # K8s cluster
+    try:
+        r = subprocess.run(
+            ["kubectl", "cluster-info"], capture_output=True, text=True, timeout=5
+        )
+        checks["cluster"] = "ok" if r.returncode == 0 else "error"
+    except Exception:
+        checks["cluster"] = "error"
+
+    # Sock Shop pods
+    try:
+        r = subprocess.run(
+            ["kubectl", "get", "pods", "-n", "sock-shop", "--no-headers"],
+            capture_output=True, text=True, timeout=5,
+        )
+        lines = [l for l in r.stdout.splitlines() if l.strip()]
+        running = sum(1 for l in lines if "Running" in l)
+        checks["sock_shop"] = {"running": running, "total": len(lines)}
+        checks["sock_shop_ok"] = running >= 8
+    except Exception:
+        checks["sock_shop"] = "error"
+        checks["sock_shop_ok"] = False
+
+    # Prometheus
+    prom_url = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
+    try:
+        r = req.get(f"{prom_url}/-/healthy", timeout=3)
+        checks["prometheus"] = "ok" if r.status_code == 200 else "degraded"
+    except Exception:
+        checks["prometheus"] = "error"
+
+    healthy = (
+        checks["cluster"] == "ok"
+        and checks.get("sock_shop_ok", False)
+        and checks["prometheus"] in ("ok", "degraded")
+    )
+    return jsonify({"healthy": healthy, "checks": checks})
+
+
 # -- Metrics API (proxy to Prometheus) --
 
 @app.route("/api/metrics/target")
@@ -424,4 +670,4 @@ def _background_emitter():
 
 if __name__ == "__main__":
     socketio.start_background_task(_background_emitter)
-    socketio.run(app, host="0.0.0.0", port=config.frontend_port, debug=False)
+    socketio.run(app, host="0.0.0.0", port=config.frontend_port, debug=False, allow_unsafe_werkzeug=True)

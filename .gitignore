@@ -118,6 +118,7 @@ captures/
 *.html
 !docs/**/*.html
 !target/**/*.html
+!kubeddos-attacks/frontend/templates/*.html
 locust-report.html
 
 # Plots and figures

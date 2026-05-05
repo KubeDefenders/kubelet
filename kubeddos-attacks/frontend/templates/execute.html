@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}KubeDDoS Attacks — Execute{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col">
+        <h4><i class="bi bi-play-circle"></i> Execute Attack</h4>
+        <p class="text-muted">Configure and launch an attack, then monitor its execution in real time.</p>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <!-- Launch panel -->
+    <div class="col-md-5">
+        <div class="card bg-dark border-secondary">
+            <div class="card-header"><h5 class="mb-0">Attack Configuration</h5></div>
+            <div class="card-body">
+                <form id="attack-form" onsubmit="launchAttack(event)">
+                    <div class="mb-3">
+                        <label class="form-label">Attack Type</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="attack-type" onchange="onTypeChange()">
+                            <option value="app_level">App-Level (HTTP Crossfire)</option>
+                            <option value="network_level">Network-Level (Raw Socket)</option>
+                            <option value="orchestrated">Orchestrated (Multi-Vector)</option>
+                        </select>
+                    </div>
+
+                    <div id="manual-config">
+                        <div class="mb-3">
+                            <label class="form-label">Target URL</label>
+                            <input type="url" class="form-control bg-dark text-light border-secondary"
+                                id="attack-target" value="{{ config.target_url }}">
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Duration (s)</label>
+                                <input type="number" class="form-control bg-dark text-light border-secondary"
+                                    id="attack-duration" value="{{ config.default_duration }}" min="10" max="3600">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Workers</label>
+                                <input type="number" class="form-control bg-dark text-light border-secondary"
+                                    id="attack-workers" value="{{ config.default_workers }}" min="1" max="500">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label">Mode</label>
+                                <select class="form-select bg-dark text-light border-secondary" id="attack-mode">
+                                    <option value="stealth">Stealth</option>
+                                    <option value="moderate" selected>Moderate</option>
+                                    <option value="aggressive">Aggressive</option>
+                                    <option value="extreme">Extreme</option>
+                                    <option value="adaptive">Adaptive</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">Pattern</label>
+                                <select class="form-select bg-dark text-light border-secondary" id="attack-pattern">
+                                    <option value="constant" selected>Constant</option>
+                                    <option value="burst">Burst</option>
+                                    <option value="wave">Wave</option>
+                                    <option value="random">Random</option>
+                                    <option value="ramp">Ramp</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="strategy-config" class="d-none">
+                        <div class="mb-3">
+                            <label class="form-label">Strategy File</label>
+                            <select class="form-select bg-dark text-light border-secondary" id="attack-strategy"></select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Duration (s)</label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                id="attack-strategy-duration" value="{{ config.default_duration }}" min="30" max="3600">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-danger w-100" id="launch-btn">
+                        <i class="bi bi-play-circle"></i> Launch Attack
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live output -->
+    <div class="col-md-7">
+        <div class="card bg-dark border-secondary h-100">
+            <div class="card-header d-flex justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-terminal"></i> Live Output</h5>
+                <span class="badge bg-secondary" id="output-status">Idle</span>
+            </div>
+            <div class="card-body p-0">
+                <pre class="p-3 mb-0 bg-black text-success small" id="live-output"
+                    style="height:400px;overflow-y:auto;font-family:monospace;white-space:pre-wrap">
+Waiting for attack to start…
+                </pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Running attacks -->
+<div class="card bg-dark border-secondary">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-activity"></i> Running Attacks</h5></div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-dark table-hover table-sm mb-0">
+                <thead>
+                    <tr><th>ID</th><th>Type</th><th>Script</th><th>Elapsed</th><th>Status</th><th>Action</th></tr>
+                </thead>
+                <tbody id="running-body">
+                    <tr><td colspan="6" class="text-center text-muted">No running attacks</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentAttackId = null;
+
+function onTypeChange() {
+    const t = document.getElementById('attack-type').value;
+    document.getElementById('manual-config').classList.toggle('d-none', t === 'orchestrated');
+    document.getElementById('strategy-config').classList.toggle('d-none', t !== 'orchestrated');
+}
+
+// Load strategies into dropdown
+(async function() {
+    const data = await kubeddos.fetchJSON('/api/strategies');
+    if (data && data.strategies) {
+        const sel = document.getElementById('attack-strategy');
+        sel.innerHTML = data.strategies.map(s =>
+            `<option value="${s._filename}">${s.name || s._filename}</option>`
+        ).join('');
+    }
+
+    // Check URL params for pre-selected strategy
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('strategy')) {
+        document.getElementById('attack-type').value = 'orchestrated';
+        onTypeChange();
+        document.getElementById('attack-strategy').value = params.get('strategy');
+    }
+})();
+
+async function launchAttack(e) {
+    e.preventDefault();
+    const type = document.getElementById('attack-type').value;
+    const body = { type };
+
+    if (type === 'orchestrated') {
+        body.strategy = document.getElementById('attack-strategy').value;
+        body.duration = parseInt(document.getElementById('attack-strategy-duration').value);
+    } else {
+        body.target_url = document.getElementById('attack-target').value;
+        body.duration = parseInt(document.getElementById('attack-duration').value);
+        body.workers = parseInt(document.getElementById('attack-workers').value);
+        body.mode = document.getElementById('attack-mode').value;
+        body.pattern = document.getElementById('attack-pattern').value;
+    }
+
+    const btn = document.getElementById('launch-btn');
+    btn.disabled = true;
+
+    try {
+        const resp = await fetch('/api/attack/launch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        if (data.id) {
+            currentAttackId = data.id;
+            document.getElementById('output-status').className = 'badge bg-danger';
+            document.getElementById('output-status').textContent = 'Running';
+            document.getElementById('live-output').textContent = `Attack ${data.id} launched.\n`;
+            kubeddos.showToast('success', `Attack launched: ${data.id}`);
+        } else {
+            kubeddos.showToast('error', data.error || 'Launch failed');
+        }
+    } catch (err) {
+        kubeddos.showToast('error', err.message);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// Live output via WebSocket
+kubeddos.on('attack_output', function(data) {
+    if (data.id === currentAttackId) {
+        const el = document.getElementById('live-output');
+        el.textContent += data.line + '\n';
+        el.scrollTop = el.scrollHeight;
+    }
+});
+
+// Update running attacks table
+async function refreshRunning() {
+    const data = await kubeddos.fetchJSON('/api/attack/status');
+    if (!data) return;
+    const attacks = data.attacks || [];
+    const tbody = document.getElementById('running-body');
+    if (attacks.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No running attacks</td></tr>';
+        if (currentAttackId) {
+            document.getElementById('output-status').className = 'badge bg-success';
+            document.getElementById('output-status').textContent = 'Completed';
+        }
+        return;
+    }
+    tbody.innerHTML = attacks.map(a => `
+        <tr>
+            <td><code class="small">${a.id}</code></td>
+            <td><span class="badge bg-info">${a.config.type}</span></td>
+            <td class="small">${a.config.script || '—'}</td>
+            <td>${kubeddos.formatDuration(a.elapsed_seconds)}</td>
+            <td>${a.running ? '<span class="badge bg-danger">Running</span>' : '<span class="badge bg-secondary">Done</span>'}</td>
+            <td>${a.running ? `<button class="btn btn-sm btn-outline-danger" onclick="stopAttack('${a.id}')">Stop</button>` : ''}</td>
+        </tr>
+    `).join('');
+}
+
+async function stopAttack(id) {
+    await fetch('/api/attack/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})});
+    refreshRunning();
+}
+
+setInterval(refreshRunning, 5000);
+refreshRunning();
+</script>
+{% endblock %}
