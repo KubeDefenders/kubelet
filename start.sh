@@ -47,6 +47,24 @@ wait_for() {
     return 0
 }
 
+# wait_for_kubectl TIMEOUT_SECS
+# Waits until the K8s API server is reachable via kubectl.
+wait_for_kubectl() {
+    local timeout="${1:-60}" elapsed=0
+    printf "  ${CYAN}→ Waiting for K8s API server"
+    while ! kubectl get nodes --no-headers > /dev/null 2>&1; do
+        if [ "$elapsed" -ge "$timeout" ]; then
+            echo -e "${NC}"
+            return 1
+        fi
+        printf "."
+        sleep 1
+        (( elapsed++ )) || true
+    done
+    echo -e "${NC}"
+    return 0
+}
+
 echo -e "${CYAN}"
 echo "  ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ██████╗  ██████╗ ███████╗"
 echo "  ██║ ██╔╝██║   ██║██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔═══██╗██╔════╝"
@@ -66,6 +84,11 @@ else
     info "Starting Minikube..."
     minikube start --driver=docker
     ok "Minikube started ($(minikube ip))"
+fi
+
+# Wait for the API server to accept connections before any kubectl calls
+if ! wait_for_kubectl 60; then
+    die "K8s API server not reachable after 60s — check: minikube status"
 fi
 
 MINIKUBE_IP=$(minikube ip)
@@ -104,18 +127,33 @@ else
     die "kubectl proxy failed to start — check /tmp/kubectl-proxy.log"
 fi
 
-# ── Step 4: Prometheus port-forward ──────────────────────────────────────────
+# ── Step 4: Prometheus ───────────────────────────────────────────────────────
 echo ""
-echo -e "${YELLOW}[4/5] Starting Prometheus port-forward...${NC}"
+echo -e "${YELLOW}[4/5] Starting Prometheus...${NC}"
 pkill -f "port-forward.*9090" 2>/dev/null || true
-sleep 1
-kubectl port-forward -n monitoring svc/prometheus 9090:9090 > /tmp/prom-portforward.log 2>&1 &
-PROM_PID=$!
-disown $PROM_PID
-if wait_for http://localhost:9090/-/healthy "Prometheus" 45; then
-    ok "Prometheus reachable (PID $PROM_PID) → http://localhost:9090"
+
+# Prefer NodePort (no port-forward = no 'no relationship found' bug)
+PROM_NODEPORT=$(kubectl get svc prometheus -n monitoring -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || true)
+if [ -n "$PROM_NODEPORT" ] && curl -sf "http://${MINIKUBE_IP}:${PROM_NODEPORT}/-/healthy" > /dev/null 2>&1; then
+    PROMETHEUS_URL="http://${MINIKUBE_IP}:${PROM_NODEPORT}"
+    ok "Prometheus via NodePort → $PROMETHEUS_URL"
 else
-    die "Prometheus port-forward failed — check /tmp/prom-portforward.log"
+    # Fallback: port-forward to pod directly (avoids svc routing bug in kubectl 1.25+)
+    PROM_POD=$(kubectl get pod -n monitoring -l app=prometheus --no-headers -o name 2>/dev/null | head -1 || true)
+    if [ -z "$PROM_POD" ]; then
+        die "No Prometheus pod found — is the monitoring stack deployed?"
+    fi
+    info "NodePort not available, using port-forward to $PROM_POD"
+    kubectl port-forward -n monitoring "$PROM_POD" 9090:9090 --address=127.0.0.1 \
+        > /tmp/prom-portforward.log 2>&1 &
+    PROM_PID=$!
+    disown $PROM_PID
+    if wait_for http://localhost:9090/-/healthy "Prometheus" 45; then
+        PROMETHEUS_URL="http://localhost:9090"
+        ok "Prometheus reachable (PID $PROM_PID) → $PROMETHEUS_URL"
+    else
+        die "Prometheus unreachable — check /tmp/prom-portforward.log"
+    fi
 fi
 
 # ── Step 5: Attack frontend ───────────────────────────────────────────────────
@@ -133,7 +171,7 @@ source "$VENV/bin/activate"
 TARGET_URL="$TARGET_URL" \
 ATTACKS_DIR="$PROJECT_ROOT/attacks" \
 CONFIGS_DIR="$PROJECT_ROOT/attacks/configs" \
-PROMETHEUS_URL="http://localhost:9090" \
+PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}" \
 KUBERNETES_API_URL="http://localhost:8001" \
 PYTHONPATH="$PROJECT_ROOT/kubeddos-attacks" \
 python3 "$PROJECT_ROOT/kubeddos-attacks/frontend/app.py" > /tmp/kubeddos-attacks.log 2>&1 &
