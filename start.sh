@@ -97,6 +97,9 @@ if ! wait_for_kubectl 60; then
     die "K8s API server not reachable after 60s — check: minikube status"
 fi
 
+# Enable metrics-server so HPAs can read CPU/memory metrics
+minikube addons enable metrics-server 2>/dev/null || true
+
 MINIKUBE_IP=$(minikube ip)
 NODE_PORT=$(kubectl get svc -n sock-shop front-end -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30001")
 TARGET_URL="http://${MINIKUBE_IP}:${NODE_PORT}"
