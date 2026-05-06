@@ -197,15 +197,39 @@ else
 fi
 
 # ── Ready ─────────────────────────────────────────────────────────────────────
+
+# Resolve the machine's LAN/external IP (first non-loopback address)
+HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
+HOST_IP="${HOST_IP:-localhost}"
+
+# Open firewall port 5001 if ufw is active
+if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    if ! ufw status | grep -q "5001"; then
+        info "Opening firewall port 5001 (ufw)..."
+        ufw allow 5001/tcp > /dev/null
+        ok "Firewall: port 5001 allowed"
+    fi
+fi
+
 echo ""
 echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  All services started successfully!${NC}"
 echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
 echo ""
-echo -e "  ${CYAN}Experiment Runner${NC}  →  http://localhost:5001/experiment"
-echo -e "  ${CYAN}Attack Dashboard${NC}   →  http://localhost:5001"
+echo -e "  ${CYAN}Experiment Runner${NC}"
+echo -e "    Local   →  http://localhost:5001/experiment"
+echo -e "    Remote  →  http://${HOST_IP}:5001/experiment"
+echo ""
+echo -e "  ${CYAN}Attack Dashboard${NC}"
+echo -e "    Local   →  http://localhost:5001"
+echo -e "    Remote  →  http://${HOST_IP}:5001"
+echo ""
 echo -e "  ${CYAN}Grafana${NC}            →  http://${MINIKUBE_IP}:31300  (admin/admin)"
 echo -e "  ${CYAN}Target App${NC}         →  $TARGET_URL"
+echo ""
+echo -e "  If you still can't reach the frontend from another machine:"
+echo -e "    sudo ufw allow 5001/tcp   # if ufw is active"
+echo -e "    sudo iptables -I INPUT -p tcp --dport 5001 -j ACCEPT  # if iptables"
 echo ""
 echo -e "  Log files:"
 echo -e "    /tmp/kubectl-proxy.log"
