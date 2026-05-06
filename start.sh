@@ -29,12 +29,18 @@ warn() { echo -e "${YELLOW}  ⚠ $*${NC}"; }
 die()  { echo -e "${RED}  ✗ $*${NC}"; exit 1; }
 
 # wait_for URL LABEL TIMEOUT_SECS
-# Polls URL every second until it responds or timeout is reached.
+# Polls URL every second until it responds, timeout is reached, or PID dies.
+# Usage: wait_for URL LABEL TIMEOUT_SECS [PID]
 wait_for() {
-    local url="$1" label="$2" timeout="${3:-30}"
+    local url="$1" label="$2" timeout="${3:-30}" pid="${4:-}"
     local elapsed=0
     printf "  ${CYAN}→ Waiting for %s" "$label"
     while ! curl -sf "$url" > /dev/null 2>&1; do
+        # If a PID was given and it has already exited, stop waiting
+        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+            echo -e "${NC}"
+            return 2  # distinct code: process died
+        fi
         if [ "$elapsed" -ge "$timeout" ]; then
             echo -e "${NC}"
             return 1
@@ -190,10 +196,17 @@ PYTHONPATH="$PROJECT_ROOT/kubeddos-attacks" \
 python3 "$PROJECT_ROOT/kubeddos-attacks/frontend/app.py" > /tmp/kubeddos-attacks.log 2>&1 &
 FRONTEND_PID=$!
 disown $FRONTEND_PID
-if wait_for http://localhost:5001/api/health "attack frontend" 30; then
+wait_status=0
+wait_for http://localhost:5001/api/health "attack frontend" 30 "$FRONTEND_PID" || wait_status=$?
+if [ "$wait_status" -eq 0 ]; then
     ok "Attack frontend running (PID $FRONTEND_PID) → http://localhost:5001"
 else
-    die "Frontend failed to start — check /tmp/kubeddos-attacks.log"
+    echo -e "${RED}  ✗ Frontend failed to start${NC}"
+    echo ""
+    echo -e "${YELLOW}  Last lines of /tmp/kubeddos-attacks.log:${NC}"
+    tail -20 /tmp/kubeddos-attacks.log | sed 's/^/    /'
+    echo ""
+    die "Fix the error above, then re-run ./start.sh"
 fi
 
 # ── Ready ─────────────────────────────────────────────────────────────────────
