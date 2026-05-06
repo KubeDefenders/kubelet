@@ -168,6 +168,19 @@ fi
 
 source "$VENV/bin/activate"
 
+# Check required packages are installed; auto-install if missing
+MISSING=$(python3 -c "
+import importlib, sys
+pkgs = {'flask':'flask','flask_socketio':'flask-socketio','yaml':'pyyaml',
+        'requests':'requests','aiohttp':'aiohttp','bs4':'beautifulsoup4','locust':'locust'}
+missing = [pip for mod,pip in pkgs.items() if importlib.util.find_spec(mod) is None]
+print(' '.join(missing))
+" 2>/dev/null)
+if [ -n "$MISSING" ]; then
+    info "Installing missing Python packages: $MISSING"
+    pip install --quiet $MISSING
+fi
+
 TARGET_URL="$TARGET_URL" \
 ATTACKS_DIR="$PROJECT_ROOT/attacks" \
 CONFIGS_DIR="$PROJECT_ROOT/attacks/configs" \

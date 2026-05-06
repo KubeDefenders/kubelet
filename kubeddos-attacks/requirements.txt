@@ -5,4 +5,7 @@ requests>=2.31.0
 flask>=3.0.0
 flask-socketio>=5.3.0
 python-socketio>=5.10.0
-eventlet>=0.35.0
+locust>=2.20.0
+# eventlet is intentionally omitted — app uses async_mode="threading".
+# eventlet>=0.37 crashes (missing OpenSSL symbol); not needed here.
+

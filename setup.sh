@@ -295,9 +295,6 @@ pip install --quiet -r kubeddos/requirements.txt
 pip install --quiet -r kubeddos-attacks/requirements.txt
 pip install --quiet -r detection/ml-detector/requirements.txt
 
-# Pin eventlet to a working version (0.41.0 crashes due to missing OpenSSL symbol)
-pip install --quiet "eventlet<0.36.0" 2>/dev/null || true
-
 ok "Python environment ready ($(python3 --version))"
 
 # =============================================================================
