@@ -172,7 +172,7 @@ if [ ! -d "$VENV" ]; then
     die "Python venv not found at $VENV — run setup.sh first"
 fi
 
-source "$VENV/bin/activate"
+source "$VENV/bin/activate" || die "Failed to activate venv at $VENV"
 
 # Check required packages are installed; auto-install if missing
 MISSING=$(python3 -c "
@@ -181,10 +181,10 @@ pkgs = {'flask':'flask','flask_socketio':'flask-socketio','yaml':'pyyaml',
         'requests':'requests','aiohttp':'aiohttp','bs4':'beautifulsoup4','locust':'locust'}
 missing = [pip for mod,pip in pkgs.items() if importlib.util.find_spec(mod) is None]
 print(' '.join(missing))
-" 2>/dev/null)
+" 2>/dev/null) || MISSING=""
 if [ -n "$MISSING" ]; then
     info "Installing missing Python packages: $MISSING"
-    pip install --quiet $MISSING
+    pip install --quiet $MISSING || warn "Some packages may not have installed cleanly"
 fi
 
 TARGET_URL="$TARGET_URL" \
@@ -195,7 +195,7 @@ KUBERNETES_API_URL="http://localhost:8001" \
 PYTHONPATH="$PROJECT_ROOT/kubeddos-attacks" \
 python3 "$PROJECT_ROOT/kubeddos-attacks/frontend/app.py" > /tmp/kubeddos-attacks.log 2>&1 &
 FRONTEND_PID=$!
-disown $FRONTEND_PID
+disown $FRONTEND_PID 2>/dev/null || true
 wait_status=0
 wait_for http://localhost:5001/api/health "attack frontend" 30 "$FRONTEND_PID" || wait_status=$?
 if [ "$wait_status" -eq 0 ]; then
