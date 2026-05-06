@@ -169,23 +169,17 @@ pkill -f "kubeddos-attacks/frontend/app.py" 2>/dev/null || true
 sleep 1
 
 if [ ! -d "$VENV" ]; then
-    die "Python venv not found at $VENV — run setup.sh first"
+    info "Creating Python virtual environment..."
+    python3 -m venv "$VENV" || die "Failed to create venv — is python3-venv installed?"
 fi
 
 source "$VENV/bin/activate" || die "Failed to activate venv at $VENV"
 
-# Check required packages are installed; auto-install if missing
-MISSING=$(python3 -c "
-import importlib, sys
-pkgs = {'flask':'flask','flask_socketio':'flask-socketio','yaml':'pyyaml',
-        'requests':'requests','aiohttp':'aiohttp','bs4':'beautifulsoup4','locust':'locust'}
-missing = [pip for mod,pip in pkgs.items() if importlib.util.find_spec(mod) is None]
-print(' '.join(missing))
-" 2>/dev/null) || MISSING=""
-if [ -n "$MISSING" ]; then
-    info "Installing missing Python packages: $MISSING"
-    pip install --quiet $MISSING || warn "Some packages may not have installed cleanly"
-fi
+# Always ensure dependencies are installed (fast no-op if already up to date)
+info "Checking Python dependencies..."
+pip install --quiet --upgrade pip
+pip install --quiet -r "$PROJECT_ROOT/kubeddos-attacks/requirements.txt" \
+    || die "Failed to install dependencies — check kubeddos-attacks/requirements.txt"
 
 TARGET_URL="$TARGET_URL" \
 ATTACKS_DIR="$PROJECT_ROOT/attacks" \
