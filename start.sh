@@ -239,3 +239,13 @@ echo ""
 echo -e "  To stop all services:"
 echo -e "    pkill -f 'kubectl proxy'; pkill -f 'port-forward.*9090'; pkill -f 'kubeddos-attacks'"
 echo ""
+
+# Open the browser locally
+BROWSER_URL="http://localhost:5001/experiment"
+if command -v xdg-open &>/dev/null; then
+    xdg-open "$BROWSER_URL" &>/dev/null &
+elif command -v open &>/dev/null; then
+    open "$BROWSER_URL" &>/dev/null &
+else
+    info "Open your browser at: $BROWSER_URL"
+fi
