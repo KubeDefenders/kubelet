@@ -75,7 +75,20 @@ stop_background_traffic() {
         BACKGROUND_TRAFFIC_PID=""
     fi
 }
-trap 'stop_background_traffic' EXIT INT TERM
+NEPHIO_CONTROLLER_PID_FILE="/tmp/nephio-controller.pid"
+
+stop_nephio_controller() {
+    if [ -f "$NEPHIO_CONTROLLER_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$NEPHIO_CONTROLLER_PID_FILE")
+        echo "  Stopping Nephio controller (PID $pid)..."
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        rm -f "$NEPHIO_CONTROLLER_PID_FILE"
+    fi
+}
+
+trap 'stop_background_traffic; stop_nephio_controller' EXIT INT TERM
 
 # Query Prometheus and return a single float value (sum over results)
 prom_query_sum() {
@@ -244,6 +257,22 @@ deploy_nephio() {
     sleep 30
 }
 
+# Deploy Nephio-integrated KubeDDoS.
+# A real kopf-based controller watches the DDoSProtection CR and generates
+# NetworkPolicies, HPAs, and ResourceQuotas from spec.intent at runtime.
+# Contrast with plain KubeDDoS (Phase 3) which applies pre-authored translated/ manifests.
+deploy_nephio_integrated() {
+    echo -e "${CYAN}Deploying Nephio-integrated KubeDDoS (real controller reconciliation)...${NC}"
+    echo "  The controller generates resources FROM the intent — no pre-authored manifests."
+
+    if [ -f "$PROJECT_ROOT/mitigation/nephio/deploy-integrated.sh" ]; then
+        bash "$PROJECT_ROOT/mitigation/nephio/deploy-integrated.sh" 2>&1
+    else
+        echo "  ERROR: deploy-integrated.sh not found"
+        return 1
+    fi
+}
+
 # Cleanup
 cleanup_all() {
     echo -e "${CYAN}Cleaning up mitigations...${NC}"
@@ -281,6 +310,15 @@ collect_metrics "nephio-pre" "$RESULTS_DIR/metrics-pre-nephio.json"
 run_attack "nephio" "$RESULTS_DIR/attack-nephio.log"
 collect_metrics "nephio-post" "$RESULTS_DIR/metrics-post-nephio.json"
 
+echo ""
+echo -e "${GREEN}=== PHASE 4: NEPHIO-INTEGRATED (Real controller reconciles intent CR) ===${NC}"
+echo "###PHASE:nephio_integrated###"
+deploy_nephio_integrated
+collect_metrics "nephio_integrated-pre" "$RESULTS_DIR/metrics-pre-nephio_integrated.json"
+run_attack "nephio_integrated" "$RESULTS_DIR/attack-nephio_integrated.log"
+collect_metrics "nephio_integrated-post" "$RESULTS_DIR/metrics-post-nephio_integrated.json"
+
+stop_nephio_controller
 stop_background_traffic
 
 #=============================================================================
@@ -307,7 +345,7 @@ cat > "$RESULTS_DIR/summary.md" <<EOF
 EOF
 
 # Parse metrics and add to table
-for scenario in baseline native nephio; do
+for scenario in baseline native nephio nephio_integrated; do
     for phase in pre during post; do
         file="$RESULTS_DIR/metrics-${phase}-${scenario}.json"
         if [ -f "$file" ]; then

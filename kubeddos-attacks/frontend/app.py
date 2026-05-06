@@ -146,7 +146,7 @@ def results_page():
 
 @app.route("/experiment")
 def experiment_page():
-    """Experiment runner — control 3-scenario DDoS comparison tests."""
+    """Experiment runner — control 4-scenario DDoS comparison tests."""
     return render_template("experiment.html", config=config)
 
 
@@ -398,6 +398,7 @@ def _stream_experiment(proc):
         "###PHASE:baseline###": "baseline",
         "###PHASE:native###": "native",
         "###PHASE:nephio###": "nephio",
+        "###PHASE:nephio_integrated###": "nephio_integrated",
     }
     for raw in proc.stdout:
         line = _ansi_strip(raw.rstrip())
@@ -427,7 +428,7 @@ def _stream_experiment(proc):
 
 @app.route("/api/experiment/run", methods=["POST"])
 def api_experiment_run():
-    """Start the 3-scenario mitigation comparison experiment."""
+    """Start the 4-scenario mitigation comparison experiment."""
     with _exp_lock:
         if _exp["running"]:
             return jsonify({"error": "Experiment already running"}), 409
@@ -551,7 +552,7 @@ def api_experiment_results_detail(name):
         return jsonify({"error": "Not found"}), 404
 
     metrics: dict = {}
-    for scenario in ("baseline", "native", "nephio"):
+    for scenario in ("baseline", "native", "nephio", "nephio_integrated"):
         for phase in ("pre", "during", "post"):
             f = results_dir / f"metrics-{phase}-{scenario}.json"
             if f.exists():

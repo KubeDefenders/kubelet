@@ -1,0 +1,47 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: DDoSProtection
+metadata:
+  name: sock-shop-ddos-protection
+  namespace: sock-shop
+  annotations:
+    nephio.org/intent: "true"
+    nephio.org/description: "DDoS protection for sock-shop with Crossfire attack mitigation"
+spec:
+  intent:
+    targetNamespace: sock-shop
+    protectionLevel: high
+    attackTypes:
+    - http-flood
+    - syn-flood
+    - slowloris
+    - crossfire-app
+    - crossfire-network
+    capacity:
+      requestsPerSecond: 10000
+      concurrentConnections: 5000
+    slo:
+      availability: 99.9
+      maxLatencyMs: 500
+      errorRate: 0.1
+    services:
+    - name: front-end
+      type: gateway
+      criticality: high
+    - name: catalogue
+      type: decoy
+      criticality: low
+    - name: carts
+      type: decoy
+      criticality: low
+    - name: user
+      type: decoy
+      criticality: low
+    - name: payment
+      type: critical
+      criticality: maximum
+    - name: orders
+      type: critical
+      criticality: maximum
+    - name: shipping
+      type: critical
+      criticality: high
