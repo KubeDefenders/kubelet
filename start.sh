@@ -28,6 +28,25 @@ info() { echo -e "${CYAN}  → $*${NC}"; }
 warn() { echo -e "${YELLOW}  ⚠ $*${NC}"; }
 die()  { echo -e "${RED}  ✗ $*${NC}"; exit 1; }
 
+# wait_for URL LABEL TIMEOUT_SECS
+# Polls URL every second until it responds or timeout is reached.
+wait_for() {
+    local url="$1" label="$2" timeout="${3:-30}"
+    local elapsed=0
+    printf "  ${CYAN}→ Waiting for %s" "$label"
+    while ! curl -sf "$url" > /dev/null 2>&1; do
+        if [ "$elapsed" -ge "$timeout" ]; then
+            echo -e "${NC}"
+            return 1
+        fi
+        printf "."
+        sleep 1
+        (( elapsed++ )) || true
+    done
+    echo -e "${NC}"
+    return 0
+}
+
 echo -e "${CYAN}"
 echo "  ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ██████╗  ██████╗ ███████╗"
 echo "  ██║ ██╔╝██║   ██║██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔═══██╗██╔════╝"
@@ -79,8 +98,7 @@ sleep 1
 kubectl proxy --port=8001 > /tmp/kubectl-proxy.log 2>&1 &
 PROXY_PID=$!
 disown $PROXY_PID
-sleep 2
-if curl -sf http://localhost:8001/api/v1/namespaces > /dev/null 2>&1; then
+if wait_for http://localhost:8001/api/v1/namespaces "kubectl proxy" 30; then
     ok "kubectl proxy running (PID $PROXY_PID) → http://localhost:8001"
 else
     die "kubectl proxy failed to start — check /tmp/kubectl-proxy.log"
@@ -94,12 +112,10 @@ sleep 1
 kubectl port-forward -n monitoring svc/prometheus 9090:9090 > /tmp/prom-portforward.log 2>&1 &
 PROM_PID=$!
 disown $PROM_PID
-sleep 3
-if curl -sf http://localhost:9090/-/healthy > /dev/null 2>&1; then
+if wait_for http://localhost:9090/-/healthy "Prometheus" 45; then
     ok "Prometheus reachable (PID $PROM_PID) → http://localhost:9090"
 else
-    warn "Prometheus port-forward may not be ready yet — continuing anyway"
-    warn "Check /tmp/prom-portforward.log if metrics don't work"
+    die "Prometheus port-forward failed — check /tmp/prom-portforward.log"
 fi
 
 # ── Step 5: Attack frontend ───────────────────────────────────────────────────
@@ -123,9 +139,7 @@ PYTHONPATH="$PROJECT_ROOT/kubeddos-attacks" \
 python3 "$PROJECT_ROOT/kubeddos-attacks/frontend/app.py" > /tmp/kubeddos-attacks.log 2>&1 &
 FRONTEND_PID=$!
 disown $FRONTEND_PID
-sleep 3
-
-if curl -sf http://localhost:5001/api/health > /dev/null 2>&1; then
+if wait_for http://localhost:5001/api/health "attack frontend" 30; then
     ok "Attack frontend running (PID $FRONTEND_PID) → http://localhost:5001"
 else
     die "Frontend failed to start — check /tmp/kubeddos-attacks.log"
