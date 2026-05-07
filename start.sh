@@ -108,6 +108,22 @@ TARGET_URL="http://${MINIKUBE_IP}:${NODE_PORT}"
 echo ""
 echo -e "${YELLOW}[2/5] Checking Sock Shop pods...${NC}"
 
+DEPLOY_MANIFEST="$(dirname "$0")/target/app/deploy/kubernetes/complete-demo.yaml"
+
+if ! kubectl get namespace sock-shop &>/dev/null; then
+    info "sock-shop namespace not found — deploying Sock Shop..."
+    kubectl apply -f "$DEPLOY_MANIFEST"
+    info "Waiting for front-end pod to be created (this takes ~3 min on first deploy)..."
+    # Poll until pod objects exist (may take 15-30s for scheduler to create them)
+    local_elapsed=0
+    until kubectl get pod -l name=front-end -n sock-shop --no-headers 2>/dev/null | grep -q .; do
+        sleep 3; local_elapsed=$((local_elapsed+3))
+        [ $local_elapsed -ge 180 ] && { warn "front-end pod not created after 3min"; break; }
+    done
+    kubectl wait --for=condition=ready pod -l name=front-end -n sock-shop --timeout=300s || \
+        warn "front-end not ready within 5min — continuing anyway"
+fi
+
 RUNNING=$(kubectl get pods -n sock-shop --no-headers 2>/dev/null | grep -c "Running" || true)
 TOTAL=$(kubectl get pods -n sock-shop --no-headers 2>/dev/null | wc -l || echo 0)
 
@@ -115,7 +131,7 @@ if [ "$RUNNING" -lt 8 ]; then
     info "Only $RUNNING/$TOTAL pods running — restarting deployments..."
     kubectl rollout restart deployment -n sock-shop
     info "Waiting for front-end pod..."
-    kubectl wait --for=condition=ready pod -l name=front-end -n sock-shop --timeout=120s
+    kubectl wait --for=condition=ready pod -l name=front-end -n sock-shop --timeout=180s
     RUNNING=$(kubectl get pods -n sock-shop --no-headers 2>/dev/null | grep -c "Running" || true)
     ok "$RUNNING pods running"
 else

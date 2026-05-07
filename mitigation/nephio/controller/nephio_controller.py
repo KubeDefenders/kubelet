@@ -353,3 +353,290 @@ def _upsert_network_policy(net_v1, ns, body, logger):
             logger.info(f"  Created NetworkPolicy {name}")
         else:
             logger.error(f"  NetworkPolicy error for {name}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# CrossfireMitigationIntent handlers
+# Nephio acts as the intent engine for the crossfire detection pipeline.
+# The pipeline is:
+#   sim_detector -> CrossfireDetectionEvent CR
+#   -> intent_generator -> CrossfireMitigationIntent CR
+#   -> nephio_controller (here) -> NetworkPolicies + HPAs
+# ---------------------------------------------------------------------------
+
+CROSSFIRE_MANAGED_LABELS = {
+    "crossfire.io/managed-by": "nephio-controller",
+    "crossfire.io/managed": "true",
+}
+
+# Label selector string for cleanup queries
+_CROSSFIRE_LABEL_SEL = "crossfire.io/managed-by=nephio-controller"
+
+
+def _extract_service_names(pods: list) -> list:
+    """
+    Derive unique Deployment names from a list of pod metadata dicts.
+    Kubernetes Deployment pod names follow: {deployment}-{rs-hash}-{pod-hash}
+    Strip the two trailing hash components to recover the deployment name.
+    Works for multi-hyphen names (e.g. front-end, orders-db).
+    """
+    names = set()
+    for pod in pods:
+        pod_name = pod.get("name", "") if isinstance(pod, dict) else str(pod)
+        if not pod_name:
+            continue
+        parts = pod_name.split("-")
+        if len(parts) >= 3:
+            names.add("-".join(parts[:-2]))
+        else:
+            names.add(pod_name)
+    return sorted(names)
+
+
+def _apply_crossfire_network_policies(net_v1, ns, gateways, decoys, logger):
+    """
+    Isolate crossfire decoy services so only gateway (front-end) traffic
+    reaches them.  This prevents the attacker from directly saturating decoy
+    pod CPU/network outside the gateway path.
+    """
+    if not decoys:
+        return
+
+    _upsert_network_policy(net_v1, ns, {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": "crossfire-decoy-isolation",
+            "namespace": ns,
+            "labels": CROSSFIRE_MANAGED_LABELS,
+            "annotations": {
+                "crossfire.io/reason": "crossfire-attack-mitigation",
+                "crossfire.io/description": (
+                    "Isolates decoy services identified by the crossfire detector. "
+                    "Only front-end gateway traffic is permitted."
+                ),
+            },
+        },
+        "spec": {
+            "podSelector": {
+                "matchExpressions": [
+                    {"key": "name", "operator": "In", "values": decoys}
+                ]
+            },
+            "policyTypes": ["Ingress"],
+            "ingress": [
+                {
+                    "from": [
+                        {
+                            "podSelector": {
+                                "matchExpressions": [
+                                    {"key": "name", "operator": "In", "values": gateways}
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
+    }, logger)
+
+
+def _apply_crossfire_hpas(autoscaling_v2, ns, victim_services, decoy_services, logger):
+    """
+    Create HPAs for detected victim and decoy services.
+    - Victims: aggressive scale-up (more replicas = more capacity for degraded traffic)
+    - Decoys: moderate scale-up (spread load across more pods, reducing per-pod impact)
+    """
+    # victim: aggressive — low cpu threshold, fast stabilization
+    for svc in victim_services:
+        hpa_name = f"crossfire-hpa-{svc}"
+        body = {
+            "apiVersion": "autoscaling/v2",
+            "kind": "HorizontalPodAutoscaler",
+            "metadata": {"name": hpa_name, "namespace": ns, "labels": CROSSFIRE_MANAGED_LABELS},
+            "spec": {
+                "scaleTargetRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": svc},
+                "minReplicas": 2,
+                "maxReplicas": 10,
+                "metrics": [{
+                    "type": "Resource",
+                    "resource": {
+                        "name": "cpu",
+                        "target": {"type": "Utilization", "averageUtilization": 60},
+                    },
+                }],
+                "behavior": {
+                    "scaleUp": {
+                        "stabilizationWindowSeconds": 10,
+                        "policies": [
+                            {"type": "Pods", "value": 4, "periodSeconds": 10},
+                            {"type": "Percent", "value": 100, "periodSeconds": 10},
+                        ],
+                        "selectPolicy": "Max",
+                    },
+                    "scaleDown": {"stabilizationWindowSeconds": 300},
+                },
+            },
+        }
+        try:
+            autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(name=hpa_name, namespace=ns)
+            autoscaling_v2.replace_namespaced_horizontal_pod_autoscaler(name=hpa_name, namespace=ns, body=body)
+            logger.info(f"  Updated crossfire HPA {hpa_name} (victim, cpu=60%)")
+        except k8s.exceptions.ApiException as e:
+            if e.status == 404:
+                autoscaling_v2.create_namespaced_horizontal_pod_autoscaler(namespace=ns, body=body)
+                logger.info(f"  Created crossfire HPA {hpa_name} (victim, cpu=60%)")
+            else:
+                logger.error(f"  HPA error for {svc}: {e}")
+
+    # decoy: moderate — spread attack load across more replicas
+    for svc in decoy_services:
+        hpa_name = f"crossfire-hpa-{svc}"
+        body = {
+            "apiVersion": "autoscaling/v2",
+            "kind": "HorizontalPodAutoscaler",
+            "metadata": {"name": hpa_name, "namespace": ns, "labels": CROSSFIRE_MANAGED_LABELS},
+            "spec": {
+                "scaleTargetRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": svc},
+                "minReplicas": 1,
+                "maxReplicas": 5,
+                "metrics": [{
+                    "type": "Resource",
+                    "resource": {
+                        "name": "cpu",
+                        "target": {"type": "Utilization", "averageUtilization": 80},
+                    },
+                }],
+                "behavior": {
+                    "scaleUp": {
+                        "stabilizationWindowSeconds": 20,
+                        "policies": [
+                            {"type": "Pods", "value": 2, "periodSeconds": 15},
+                        ],
+                        "selectPolicy": "Max",
+                    },
+                    "scaleDown": {"stabilizationWindowSeconds": 300},
+                },
+            },
+        }
+        try:
+            autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(name=hpa_name, namespace=ns)
+            autoscaling_v2.replace_namespaced_horizontal_pod_autoscaler(name=hpa_name, namespace=ns, body=body)
+            logger.info(f"  Updated crossfire HPA {hpa_name} (decoy, cpu=80%)")
+        except k8s.exceptions.ApiException as e:
+            if e.status == 404:
+                autoscaling_v2.create_namespaced_horizontal_pod_autoscaler(namespace=ns, body=body)
+                logger.info(f"  Created crossfire HPA {hpa_name} (decoy, cpu=80%)")
+            else:
+                logger.error(f"  HPA error for {svc}: {e}")
+
+
+@kopf.on.create("crossfire.io", "v1alpha1", "crossfiremitigationintents")
+@kopf.on.update("crossfire.io", "v1alpha1", "crossfiremitigationintents")
+def reconcile_crossfire_intent(spec, name, namespace, logger, **kwargs):
+    """
+    Reconcile a CrossfireMitigationIntent into concrete K8s resources.
+    Replaces the custom controller.py with Nephio as the intent engine.
+    """
+    kubernetes.config.load_kube_config()
+    net_v1 = k8s.NetworkingV1Api()
+    autoscaling_v2 = k8s.AutoscalingV2Api()
+
+    decoy_pods = spec.get("decoyPods", [])
+    victim_pods = spec.get("victimPods", [])
+
+    # Derive target namespace from the first pod entry
+    target_ns = (
+        decoy_pods[0].get("namespace") if decoy_pods else
+        victim_pods[0].get("namespace") if victim_pods else
+        "sock-shop"
+    )
+
+    decoy_services = _extract_service_names(decoy_pods)
+    victim_services = _extract_service_names(victim_pods)
+    gateways = ["front-end"]
+
+    logger.info(
+        f"Nephio reconciling CrossfireMitigationIntent '{name}': "
+        f"ns={target_ns}, decoys={decoy_services}, victims={victim_services}"
+    )
+
+    _apply_crossfire_network_policies(net_v1, target_ns, gateways, decoy_services, logger)
+    _apply_crossfire_hpas(autoscaling_v2, target_ns, victim_services, decoy_services, logger)
+
+    logger.info(f"Nephio reconciliation complete for CrossfireMitigationIntent '{name}'")
+    return {
+        "nephio_reconciled": True,
+        "target_ns": target_ns,
+        "decoy_services": decoy_services,
+        "victim_services": victim_services,
+    }
+
+
+@kopf.on.delete("crossfire.io", "v1alpha1", "crossfiremitigationintents")
+def cleanup_crossfire_intent(spec, name, namespace, logger, **kwargs):
+    """Remove all K8s resources created for a CrossfireMitigationIntent."""
+    kubernetes.config.load_kube_config()
+    net_v1 = k8s.NetworkingV1Api()
+    autoscaling_v2 = k8s.AutoscalingV2Api()
+
+    decoy_pods = spec.get("decoyPods", [])
+    victim_pods = spec.get("victimPods", [])
+    target_ns = (
+        decoy_pods[0].get("namespace") if decoy_pods else
+        victim_pods[0].get("namespace") if victim_pods else
+        "sock-shop"
+    )
+
+    logger.info(f"Nephio cleanup for CrossfireMitigationIntent '{name}' in {target_ns}")
+
+    # Remove NetworkPolicies tagged with crossfire.io/managed-by=nephio-controller
+    try:
+        net_v1.delete_collection_namespaced_network_policy(
+            namespace=target_ns, label_selector=_CROSSFIRE_LABEL_SEL
+        )
+        logger.info(f"  Removed crossfire NetworkPolicies from {target_ns}")
+    except Exception as e:
+        logger.warning(f"  NP cleanup error: {e}")
+
+    # Remove HPAs by name
+    all_services = _extract_service_names(decoy_pods) + _extract_service_names(victim_pods)
+    for svc in all_services:
+        hpa_name = f"crossfire-hpa-{svc}"
+        try:
+            autoscaling_v2.delete_namespaced_horizontal_pod_autoscaler(
+                name=hpa_name, namespace=target_ns
+            )
+            logger.info(f"  Removed HPA {hpa_name}")
+        except k8s.exceptions.ApiException as e:
+            if e.status != 404:
+                logger.warning(f"  HPA cleanup error for {hpa_name}: {e}")
+
+    logger.info(f"Nephio cleanup complete for '{name}'")
+
+
+@kopf.daemon(
+    "crossfire.io", "v1alpha1", "crossfiremitigationintents",
+    cancellation_timeout=5,
+)
+async def ttl_daemon(spec, name, logger, stopped, **kwargs):
+    """
+    Auto-delete the CrossfireMitigationIntent when its TTL expires.
+    Deletion triggers cleanup_crossfire_intent to remove generated resources.
+    """
+    import asyncio as _asyncio
+    ttl = int(spec.get("ttlSeconds", 300))
+    logger.info(f"TTL daemon started for CMI '{name}', expires in {ttl}s")
+    try:
+        await _asyncio.wait_for(stopped.wait(), timeout=float(ttl))
+        logger.info(f"CMI '{name}' deleted before TTL — daemon stopping")
+    except _asyncio.TimeoutError:
+        logger.info(f"TTL expired for CMI '{name}', triggering auto-deletion")
+        try:
+            kubernetes.config.load_kube_config()
+            custom_api = k8s.CustomObjectsApi()
+            custom_api.delete_cluster_custom_object(
+                "crossfire.io", "v1alpha1", "crossfiremitigationintents", name
+            )
+        except Exception as e:
+            logger.warning(f"TTL auto-delete failed for '{name}': {e}")

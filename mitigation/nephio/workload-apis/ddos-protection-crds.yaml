@@ -87,8 +87,16 @@ spec:
                             pattern: '^[0-9]+[KMGT]bps$'
                   slo:
                     type: object
+                    x-kubernetes-preserve-unknown-fields: true
                     properties:
                       availability:
+                        type: number
+                        minimum: 0
+                        maximum: 100
+                      maxLatencyMs:
+                        type: integer
+                        minimum: 0
+                      errorRate:
                         type: number
                         minimum: 0
                         maximum: 100

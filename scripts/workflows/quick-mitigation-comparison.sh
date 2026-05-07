@@ -303,15 +303,7 @@ run_attack "native" "$RESULTS_DIR/attack-native.log"
 collect_metrics "native-post" "$RESULTS_DIR/metrics-post-native.json"
 
 echo ""
-echo -e "${GREEN}=== PHASE 3: KUBEDDOS (Nephio full stack — NetworkPolicies + HPAs + PriorityClasses) ===${NC}"
-echo "###PHASE:nephio###"
-deploy_nephio
-collect_metrics "nephio-pre" "$RESULTS_DIR/metrics-pre-nephio.json"
-run_attack "nephio" "$RESULTS_DIR/attack-nephio.log"
-collect_metrics "nephio-post" "$RESULTS_DIR/metrics-post-nephio.json"
-
-echo ""
-echo -e "${GREEN}=== PHASE 4: NEPHIO-INTEGRATED (Real controller reconciles intent CR) ===${NC}"
+echo -e "${GREEN}=== PHASE 3: NEPHIO-INTEGRATED (Real controller reconciles intent CR) ===${NC}"
 echo "###PHASE:nephio_integrated###"
 deploy_nephio_integrated
 collect_metrics "nephio_integrated-pre" "$RESULTS_DIR/metrics-pre-nephio_integrated.json"
@@ -345,7 +337,7 @@ cat > "$RESULTS_DIR/summary.md" <<EOF
 EOF
 
 # Parse metrics and add to table
-for scenario in baseline native nephio nephio_integrated; do
+for scenario in baseline native nephio_integrated; do
     for phase in pre during post; do
         file="$RESULTS_DIR/metrics-${phase}-${scenario}.json"
         if [ -f "$file" ]; then

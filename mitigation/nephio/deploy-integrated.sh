@@ -13,9 +13,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../" && pwd)"
-CONTROLLER="$SCRIPT_DIR/nephio_controller.py"
-INTENT_CR="$SCRIPT_DIR/intent-cr.yaml"
-CRD_FILE="$SCRIPT_DIR/../workload-apis/ddos-protection-crds.yaml"
+CONTROLLER="$SCRIPT_DIR/controller/nephio_controller.py"
+INTENT_CR="$SCRIPT_DIR/controller/intent-cr.yaml"
+CRD_FILE="$SCRIPT_DIR/workload-apis/ddos-protection-crds.yaml"
 
 # Python / kopf executable — use project venv if present
 PYTHON="${PROJECT_ROOT}/.venv/bin/python"
