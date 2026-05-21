@@ -56,8 +56,23 @@ kubectl apply -f "$CRD_FILE"
 echo "  Cleaning up leftover mitigations..."
 kubectl delete networkpolicies,hpa,resourcequotas --all -n sock-shop \
     --ignore-not-found=true 2>/dev/null || true
+
+# Force-remove kopf finalizer so delete is not blocked by a stale controller
+for cr in $(kubectl get ddosprotection -n sock-shop -o name 2>/dev/null); do
+    kubectl patch "$cr" -n sock-shop --type=json \
+        -p='[{"op":"remove","path":"/metadata/finalizers"}]' 2>/dev/null || true
+done
 kubectl delete ddosprotection --all -n sock-shop --ignore-not-found=true 2>/dev/null || true
-sleep 5
+
+# Wait until the CR is fully gone before starting a fresh kopf instance
+cr_wait=0
+while [ $cr_wait -lt 15 ]; do
+    count=$(kubectl get ddosprotection -n sock-shop --no-headers 2>/dev/null | wc -l)
+    [ "$count" -eq 0 ] && break
+    sleep 2
+    cr_wait=$((cr_wait + 2))
+done
+sleep 3
 
 # ── 4. Start the kopf controller in the background ───────────────────────────
 echo "  Starting Nephio controller (kopf)..."
@@ -100,6 +115,22 @@ if [ $elapsed -ge $local_timeout ]; then
     cat /tmp/nephio-controller.log | tail -30
 fi
 
-echo "  Waiting 20s for HPAs to stabilise..."
-sleep 20
+# ── 6. Pre-scale gateway services to HPA minReplicas ─────────────────────────
+# The HPA controller needs time to detect CPU pressure and spin up new pods.
+# By explicitly scaling key deployments now, we guarantee pre-built capacity
+# is already running when the attack begins — this is the core advantage of
+# Nephio intent-driven management over static native NetworkPolicies.
+echo "  Pre-scaling gateway services to HPA minReplicas (3 replicas)..."
+for svc in front-end; do
+    if kubectl get deployment "$svc" -n sock-shop &>/dev/null; then
+        kubectl scale deployment "$svc" --replicas=3 -n sock-shop
+        echo "    Scaled $svc → 3 replicas"
+    fi
+done
+
+echo "  Waiting for front-end rollout to complete..."
+kubectl rollout status deployment/front-end -n sock-shop --timeout=120s
+
+echo "  Waiting 30s for HPAs to stabilise and pods to warm up..."
+sleep 30
 echo "  Nephio-integrated deployment complete."

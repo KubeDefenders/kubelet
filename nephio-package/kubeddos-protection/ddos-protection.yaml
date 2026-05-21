@@ -1,0 +1,87 @@
+---
+# DDoSProtection intent — the only resource you need to customise per application.
+#
+# The kubeddos-system controller watches this CR and automatically creates:
+#   - NetworkPolicies in <targetNamespace> that isolate decoy services and
+#     protect gateway/critical services from cross-traffic
+#   - HorizontalPodAutoscalers for every listed service, scaled to the
+#     chosen protectionLevel
+#   - A ResourceQuota on <targetNamespace> sized to the protectionLevel
+#
+# SERVICE TYPES:
+#   gateway   — public entry points (ingress, api-gateway, front-end).
+#               Gets a permissive NetworkPolicy that allows all ingress.
+#   decoy     — services frequently targeted as attack amplifiers (e.g. catalogue,
+#               cart, search).  Gets an isolating NetworkPolicy that blocks
+#               direct external ingress.
+#   critical  — back-end services that must never be starved (payment, orders,
+#               database).  Gets a whitelist NetworkPolicy that only allows
+#               traffic from gateway/other critical services.
+#
+# Edit the services list to match your application topology, then:
+#   kubectl apply -f ddos-protection.yaml
+#   — or —
+#   kpt live apply nephio-package/kubeddos-protection/
+apiVersion: workload.nephio.org/v1alpha1
+kind: DDoSProtection
+metadata:
+  name: sock-shop-ddos-protection # kpt-set: ${protection-name}
+  namespace: sock-shop # kpt-set: ${target-namespace}
+  annotations:
+    nephio.org/intent: "true"
+    nephio.org/description: "KubeDDoS protection for sock-shop" # kpt-set: ${protection-name}
+spec:
+  intent:
+    # The namespace whose workloads will be protected.
+    # Must already exist; the controller does not create it.
+    targetNamespace: sock-shop # kpt-set: ${target-namespace}
+
+    # Protection level drives HPA and quota sizing — see setters.yaml.
+    # high → minReplicas=3, maxReplicas=20, cpu_target=70%, scaleup_stabilization=30s
+    protectionLevel: high # kpt-set: ${protection-level}
+
+    # Attack types this protection guards against.
+    attackTypes:
+      - http-flood
+      - syn-flood
+      - slowloris
+      - crossfire-app
+      - crossfire-network
+
+    # Capacity hints (informational).
+    capacity:
+      requestsPerSecond: 10000
+      concurrentConnections: 5000
+
+    # SLO targets — stored for observability; not enforced by the controller.
+    slo:
+      availability: "99.9" # kpt-set: ${slo-availability}
+      maxLatencyMs: 500 # kpt-set: ${slo-max-latency-ms}
+      errorRate: 0.1 # kpt-set: ${slo-error-rate}
+
+    # ── Sock Shop service topology ───────────────────────────────────────────
+    # gateway  → permissive NetworkPolicy (allows all ingress)
+    # decoy    → isolating policy (only reachable from gateway pods)
+    # critical → whitelist policy (only reachable from gateway + db pods)
+    services:
+      - name: front-end   # NodePort 30001 — sole public entry point
+        type: gateway
+        criticality: high
+      - name: catalogue   # product catalogue — common DDoS amplifier target
+        type: decoy
+        criticality: low
+      - name: carts       # shopping cart — another crossfire decoy target
+        type: decoy
+        criticality: low
+      - name: user        # auth/profile — decoy in crossfire scenarios
+        type: decoy
+        criticality: low
+      - name: payment     # payment processing — must not be starved
+        type: critical
+        criticality: maximum
+      - name: orders      # order placement — must not be starved
+        type: critical
+        criticality: maximum
+      - name: shipping    # shipping quotes — back-end critical path
+        type: critical
+        criticality: high

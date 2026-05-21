@@ -1,0 +1,25 @@
+apiVersion: fn.kpt.dev/v1alpha1
+kind: ApplySetters
+metadata:
+  name: setters
+  annotations:
+    config.kubernetes.io/local-config: "true"
+setters:
+  # Namespace where the KubeDDoS controller runs (cluster-scoped, deploy once)
+  # Change this only if you have a namespace collision.
+  system-namespace: crossfire-system
+
+  # Container image for the DDoSProtection controller.
+  # Build and push with:
+  #   docker build -t <registry>/kubeddos-controller:latest \
+  #       -f nephio-package/kubeddos-system/Dockerfile \
+  #       mitigation/nephio/controller/
+  #   docker push <registry>/kubeddos-controller:latest
+  # For minikube (local) use:
+  #   minikube image build -t kubeddos-controller:latest \
+  #       -f nephio-package/kubeddos-system/Dockerfile \
+  #       mitigation/nephio/controller/
+  controller-image: kubeddos-controller:latest
+
+  # Set to "Always" when using a remote registry; "IfNotPresent" for local/minikube.
+  image-pull-policy: IfNotPresent

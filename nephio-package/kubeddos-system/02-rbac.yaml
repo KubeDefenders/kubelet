@@ -1,0 +1,91 @@
+---
+# ServiceAccount for the KubeDDoS controller pod.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubeddos-controller
+  namespace: crossfire-system # kpt-set: ${system-namespace}
+  labels:
+    app.kubernetes.io/part-of: kubeddos
+    app.kubernetes.io/component: controller
+
+---
+# ClusterRole grants the controller the permissions it needs across all
+# namespaces. Permissions are scoped to only the resource types the controller
+# actually reads or writes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeddos-controller
+  labels:
+    app.kubernetes.io/part-of: kubeddos
+    app.kubernetes.io/component: controller
+rules:
+  # --- Workload Nephio CRDs (DDoSProtection) ---
+  - apiGroups: ["workload.nephio.org"]
+    resources: ["ddosprotections"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["workload.nephio.org"]
+    resources: ["ddosprotections/status"]
+    verbs: ["get", "patch", "update"]
+
+  # --- Crossfire CRDs (CrossfireMitigationIntent + CrossfireDetectionEvent) ---
+  - apiGroups: ["crossfire.io"]
+    resources:
+      - crossfiremitigationintents
+      - crossfiredetectionevents
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["crossfire.io"]
+    resources:
+      - crossfiremitigationintents/status
+      - crossfiredetectionevents/status
+    verbs: ["get", "patch", "update"]
+
+  # --- Mitigation resources in application namespaces ---
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+  # --- Kopf internal requirements ---
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+
+---
+# Bind the ClusterRole to the controller ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeddos-controller
+  labels:
+    app.kubernetes.io/part-of: kubeddos
+    app.kubernetes.io/component: controller
+subjects:
+  - kind: ServiceAccount
+    name: kubeddos-controller
+    namespace: crossfire-system # kpt-set: ${system-namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubeddos-controller

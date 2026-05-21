@@ -1,0 +1,35 @@
+apiVersion: kpt.dev/v1
+kind: Kptfile
+metadata:
+  name: kubeddos-system
+  annotations:
+    config.kubernetes.io/local-config: "true"
+info:
+  description: |
+    KubeDDoS system package — installs CRDs and the DDoSProtection controller
+    once per cluster.
+
+    After deploying this package, use the companion kubeddos-protection package
+    for each application you want to protect. The controller watches
+    DDoSProtection custom resources and reconciles them into NetworkPolicies,
+    HPAs, and ResourceQuotas in the target application namespace.
+
+    Prerequisites:
+      - Kubernetes >= 1.24
+      - kubectl configured against your target cluster
+      - kpt CLI (optional, for function pipeline evaluation)
+  keywords:
+    - ddos
+    - crossfire
+    - mitigation
+    - nephio
+    - intent-based-networking
+    - kopf
+pipeline:
+  mutators:
+    - image: gcr.io/kpt-fn/apply-setters:v0.2.0
+      configPath: setters.yaml
+  validators:
+    - image: gcr.io/kpt-fn/kubeval:v0.3.0
+      configMap:
+        ignore-missing-schemas: "true"

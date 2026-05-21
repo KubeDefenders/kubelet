@@ -14,7 +14,7 @@ NC='\033[0m'
 
 # Configuration
 NAMESPACE="sock-shop"
-ATTACK_DURATION="${ATTACK_DURATION:-120}"  # 2 minutes
+ATTACK_DURATION="${ATTACK_DURATION:-180}"  # 3 minutes — long enough for HPAs to scale during attack
 ATTACK_WORKERS="${ATTACK_WORKERS:-80}"
 ATTACK_RATE="${ATTACK_RATE:-20}"
 BACKGROUND_WORKERS="${BACKGROUND_WORKERS:-15}"

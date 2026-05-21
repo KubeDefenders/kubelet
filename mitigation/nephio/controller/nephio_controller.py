@@ -22,11 +22,14 @@ import kubernetes
 from kubernetes import client as k8s
 
 # protectionLevel → (hpa_min, hpa_max, cpu_utilization_target%, scaleup_stabilization_s)
+# minReplicas > 1 ensures pre-scaled capacity is available before an attack peaks.
+# "high" starts 3 replicas per service so the load is distributed from the first request.
+# "maximum" starts 5 replicas for mission-critical services under sustained attack.
 LEVEL_HPA = {
     "low":     (1,  5,  90, 120),
-    "medium":  (1, 10,  80,  60),
-    "high":    (1, 20,  70,  30),
-    "maximum": (2, 30,  60,  15),
+    "medium":  (2, 10,  80,  60),
+    "high":    (3, 20,  70,  30),
+    "maximum": (5, 30,  60,  15),
 }
 
 # protectionLevel → (quota_requests_cpu, quota_requests_memory)

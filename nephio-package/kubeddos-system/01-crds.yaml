@@ -1,0 +1,1093 @@
+---
+# Custom Resource Definition for DDoS Protection Intent
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ddosprotections.workload.nephio.org
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.0
+spec:
+  group: workload.nephio.org
+  names:
+    kind: DDoSProtection
+    listKind: DDoSProtectionList
+    plural: ddosprotections
+    singular: ddosprotection
+    shortNames:
+    - ddosp
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        description: DDoSProtection declares intent for DDoS attack mitigation
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required:
+            - intent
+            properties:
+              intent:
+                type: object
+                required:
+                - targetNamespace
+                - protectionLevel
+                properties:
+                  targetNamespace:
+                    type: string
+                    description: Namespace to protect
+                  protectionLevel:
+                    type: string
+                    enum:
+                    - low
+                    - medium
+                    - high
+                    - maximum
+                    description: Protection level determines mitigation aggressiveness
+                  attackTypes:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                      - http-flood
+                      - syn-flood
+                      - udp-flood
+                      - slowloris
+                      - dns-amplification
+                      - crossfire-app
+                      - crossfire-network
+                    description: Attack types to protect against
+                  capacity:
+                    type: object
+                    properties:
+                      requestsPerSecond:
+                        type: integer
+                        minimum: 1
+                        description: Total RPS capacity
+                      concurrentConnections:
+                        type: integer
+                        minimum: 1
+                      bandwidth:
+                        type: object
+                        properties:
+                          downlink:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]bps$'
+                          uplink:
+                            type: string
+                            pattern: '^[0-9]+[KMGT]bps$'
+                  slo:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      availability:
+                        type: number
+                        minimum: 0
+                        maximum: 100
+                      maxLatencyMs:
+                        type: integer
+                        minimum: 0
+                      errorRate:
+                        type: number
+                        minimum: 0
+                        maximum: 100
+                      latencyP50:
+                        type: string
+                        pattern: '^[0-9]+m?s$'
+                      latencyP95:
+                        type: string
+                        pattern: '^[0-9]+m?s$'
+                      latencyP99:
+                        type: string
+                        pattern: '^[0-9]+m?s$'
+                      errorRate:
+                        type: number
+                        minimum: 0
+                        maximum: 100
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                      - name
+                      - type
+                      - criticality
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                          enum:
+                          - gateway
+                          - critical
+                          - decoy
+                          - database
+                        criticality:
+                          type: string
+                          enum:
+                          - low
+                          - medium
+                          - high
+                          - maximum
+                        resources:
+                          type: object
+                          properties:
+                            cpu:
+                              type: string
+                            memory:
+                              type: string
+                  mitigations:
+                    type: object
+                    properties:
+                      rateLimiting:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          strategy:
+                            type: string
+                            enum:
+                            - adaptive
+                            - fixed
+                          global:
+                            type: integer
+                          perIP:
+                            type: integer
+                      circuitBreaking:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          consecutiveErrors:
+                            type: integer
+                          interval:
+                            type: string
+                          ejectionTime:
+                            type: string
+                      networkPolicies:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          defaultDeny:
+                            type: boolean
+                          allowDNS:
+                            type: boolean
+                      autoscaling:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          minReplicas:
+                            type: integer
+                          maxReplicas:
+                            type: integer
+                          targetCPU:
+                            type: integer
+                          targetMemory:
+                            type: integer
+                          scaleUpBehavior:
+                            type: string
+                            enum:
+                            - aggressive
+                            - conservative
+                          scaleDownBehavior:
+                            type: string
+                            enum:
+                            - aggressive
+                            - conservative
+                      resourceQuotas:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          cpuLimit:
+                            type: integer
+                          memoryLimit:
+                            type: string
+                          maxPods:
+                            type: integer
+                  networkFunctions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        enabled:
+                          type: boolean
+                        placement:
+                          type: string
+                          enum:
+                          - ingress
+                          - egress
+                          - service-mesh
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              capacityAllocated:
+                type: object
+                properties:
+                  cpu:
+                    type: string
+                  memory:
+                    type: string
+                  bandwidth:
+                    type: string
+              resourcesCreated:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+    additionalPrinterColumns:
+    - name: Protection Level
+      type: string
+      jsonPath: .spec.intent.protectionLevel
+    - name: Target Namespace
+      type: string
+      jsonPath: .spec.intent.targetNamespace
+    - name: RPS Capacity
+      type: integer
+      jsonPath: .spec.intent.capacity.requestsPerSecond
+    - name: Status
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+---
+# CapacityRequest CRD
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: capacityrequests.req.nephio.org
+spec:
+  group: req.nephio.org
+  names:
+    kind: CapacityRequest
+    listKind: CapacityRequestList
+    plural: capacityrequests
+    singular: capacityrequest
+    shortNames:
+    - capreq
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required:
+            - for
+            - capacity
+            properties:
+              for:
+                type: object
+                required:
+                - group
+                - kind
+                - name
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+              capacity:
+                type: object
+                properties:
+                  downlink:
+                    type: string
+                  uplink:
+                    type: string
+                  ipv4:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+                  ipv6:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+              placement:
+                type: object
+                properties:
+                  clusterSelector:
+                    type: object
+                    properties:
+                      matchLabels:
+                        type: object
+                        additionalProperties:
+                          type: string
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              allocated:
+                type: object
+                properties:
+                  downlink:
+                    type: string
+                  uplink:
+                    type: string
+                  ipv4Addresses:
+                    type: array
+                    items:
+                      type: string
+                  ipv6Addresses:
+                    type: array
+                    items:
+                      type: string
+    additionalPrinterColumns:
+    - name: For Kind
+      type: string
+      jsonPath: .spec.for.kind
+    - name: For Name
+      type: string
+      jsonPath: .spec.for.name
+    - name: Downlink
+      type: string
+      jsonPath: .spec.capacity.downlink
+    - name: Uplink
+      type: string
+      jsonPath: .spec.capacity.uplink
+    - name: Status
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Allocated")].status
+---
+# NFDeployment CRD for network function chaining
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nfdeployments.nf.nephio.org
+spec:
+  group: nf.nephio.org
+  names:
+    kind: NFDeployment
+    listKind: NFDeploymentList
+    plural: nfdeployments
+    singular: nfdeployment
+    shortNames:
+    - nfd
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required:
+            - nfChain
+            properties:
+              nfChain:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - name
+                  - function
+                  - image
+                  properties:
+                    name:
+                      type: string
+                    function:
+                      type: string
+                      enum:
+                      - attack-detection
+                      - rate-limiting
+                      - traffic-shaping
+                      - circuit-breaking
+                      - packet-filtering
+                    image:
+                      type: string
+                    config:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+              connectivityType:
+                type: string
+                enum:
+                - service-mesh
+                - cni
+                - sriov
+              serviceMesh:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                    enum:
+                    - istio
+                    - linkerd
+                    - consul
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+              deployedFunctions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    status:
+                      type: string
+    additionalPrinterColumns:
+    - name: Functions
+      type: integer
+      jsonPath: .spec.nfChain.length
+    - name: Connectivity
+      type: string
+      jsonPath: .spec.connectivityType
+    - name: Status
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: crossfiredetectionevents.crossfire.io
+  labels:
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+    app.kubernetes.io/managed-by: crossfire-controller
+  annotations:
+    # This CRD aligns with Nephio's event-sourcing pattern:
+    # conditions are observable, spec is immutable after creation.
+    crossfire.io/description: >
+      Emitted by the CrossfireDetector service when the four invariants of an
+      indirect crossfire attack are simultaneously satisfied on a cluster node.
+      Immutable once created; resolved via status.resolved = true.
+spec:
+  group: crossfire.io
+  scope: Cluster
+  names:
+    plural: crossfiredetectionevents
+    singular: crossfiredetectionevent
+    kind: CrossfireDetectionEvent
+    shortNames:
+    - cde
+    categories:
+    - crossfire
+    - networking
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.affectedNode
+    - name: Interface
+      type: string
+      jsonPath: .spec.congestedInterface
+    - name: LinkUtilPct
+      type: number
+      jsonPath: .spec.linkUtilizationPct
+    - name: Confidence
+      type: number
+      jsonPath: .spec.confidenceScore
+    - name: Resolved
+      type: boolean
+      jsonPath: .status.resolved
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            description: >
+              Immutable specification of the detected crossfire event.
+              Set once by the detector; never modified after creation.
+            required:
+            - detectedAt
+            - affectedNode
+            - congestedInterface
+            - linkUtilizationPct
+            - packetDropRate
+            - decoyPods
+            - victimPods
+            - victimErrorRatePct
+            - victimDirectTrafficPct
+            - confidenceScore
+            - detectionAlgorithm
+            properties:
+              detectedAt:
+                type: string
+                format: date-time
+                description: RFC3339 timestamp when detection was confirmed.
+
+              affectedNode:
+                type: string
+                description: Kubernetes node name on which congestion was observed.
+                minLength: 1
+
+              congestedInterface:
+                type: string
+                description: >
+                  Linux network interface on the node that is saturated
+                  (e.g., eth0, ens3, bond0).
+                minLength: 1
+
+              linkUtilizationPct:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 100.0
+                description: >
+                  Percentage of the interface's nominal capacity currently in use
+                  (receive + transmit combined), averaged over the detection window.
+
+              packetDropRate:
+                type: number
+                format: double
+                minimum: 0.0
+                description: >
+                  Interface packet drops per second at the time of detection,
+                  measured via node_network_receive_drop_total delta.
+
+              decoyPods:
+                type: array
+                description: >
+                  Pods on affectedNode identified as primary bandwidth consumers
+                  (the unwitting decoys of the crossfire attack).
+                minItems: 1
+                items:
+                  type: object
+                  required: [namespace, name, podIP, byteRateMbps]
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    podIP:
+                      type: string
+                    byteRateMbps:
+                      type: number
+                      format: double
+                      minimum: 0.0
+                      description: Observed ingress byte rate for this pod in Mbps.
+
+              victimPods:
+                type: array
+                description: >
+                  Pods on affectedNode that are experiencing degradation without
+                  proportional direct attack traffic (the actual crossfire victims).
+                minItems: 1
+                items:
+                  type: object
+                  required: [namespace, name, podIP]
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    podIP:
+                      type: string
+                    deploymentName:
+                      type: string
+                      description: >
+                        Owning Deployment name, used by the controller
+                        to apply topology and priority patches.
+
+              victimErrorRatePct:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 100.0
+                description: >
+                  Error rate of victim service(s) at detection time, expressed
+                  as a percentage of total requests.
+
+              victimDirectTrafficPct:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 100.0
+                description: >
+                  Percentage of total node NIC traffic that is directed at victim
+                  pods. A low value (< 10%) is the critical distinguishing
+                  invariant of indirect crossfire vs. direct attack.
+
+              confidenceScore:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 1.0
+                description: >
+                  Score [0,1] reflecting how strongly all four crossfire
+                  invariants are satisfied simultaneously.
+                  >= 0.7: probable crossfire; >= 0.9: high-confidence crossfire.
+
+              detectionAlgorithm:
+                type: string
+                description: >
+                  Identifier of the detection algorithm version used, for
+                  audit and reproducibility.
+                  Format: "crossfire-invariant-v1" or similar.
+
+              detectionWindowSeconds:
+                type: integer
+                minimum: 1
+                description: Length of the evaluation window used (seconds).
+
+          status:
+            type: object
+            description: Mutable status subresource; updated by the IntentGenerator.
+            properties:
+              resolved:
+                type: boolean
+                default: false
+                description: >
+                  True when the crossfire condition is no longer present.
+                  Set by the detector when link utilization drops below threshold.
+
+              resolvedAt:
+                type: string
+                format: date-time
+                description: RFC3339 timestamp when resolution was confirmed.
+
+              mitigationRef:
+                type: string
+                description: >
+                  Name of the CrossfireMitigationIntent created in response to
+                  this event. Empty if no intent was generated yet.
+
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required: [type, status]
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: crossfiremitigationintents.crossfire.io
+  labels:
+    app.kubernetes.io/part-of: crossfire-nephio-refactor
+    app.kubernetes.io/managed-by: crossfire-controller
+  annotations:
+    crossfire.io/description: >
+      Declarative intent for indirect crossfire mitigation.
+      Created by the IntentGenerator; reconciled into Kubernetes-native
+      resources by the CrossfireMitigationController.
+      This CRD embodies the Nephio principle of intent-based networking:
+      the operator declares *what* protection is needed; the controller
+      determines *how* to implement it using standard Kubernetes APIs.
+spec:
+  group: crossfire.io
+  scope: Cluster
+  names:
+    plural: crossfiremitigationintents
+    singular: crossfiremitigationintent
+    kind: CrossfireMitigationIntent
+    shortNames:
+    - cmi
+    - cfmi
+    categories:
+    - crossfire
+    - networking
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.affectedNode
+    - name: Strategy
+      type: string
+      jsonPath: .spec.strategy.type
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    - name: TTL
+      type: integer
+      jsonPath: .spec.ttlSeconds
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+
+          spec:
+            type: object
+            description: >
+              Desired mitigation state. This is the INTENT — what protection
+              the system needs, not how to achieve it. The controller is
+              responsible for translating this intent into concrete Kubernetes
+              resources.
+            required:
+            - triggerEventRef
+            - affectedNode
+            - congestedInterface
+            - decoyPods
+            - victimPods
+            - strategy
+            - ttlSeconds
+            properties:
+              triggerEventRef:
+                type: string
+                description: >
+                  Name of the CrossfireDetectionEvent that triggered this intent.
+                  Immutable after creation.
+                minLength: 1
+
+              affectedNode:
+                type: string
+                description: >
+                  Name of the Kubernetes node where crossfire congestion
+                  was detected.
+                minLength: 1
+
+              congestedInterface:
+                type: string
+                description: >
+                  Linux network interface on affectedNode that is congested.
+                minLength: 1
+
+              decoyPods:
+                type: array
+                description: >
+                  Pods identified as primary bandwidth consumers to be
+                  constrained by the mitigation.
+                minItems: 1
+                items:
+                  type: object
+                  required: [namespace, name]
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    deploymentName:
+                      type: string
+                      description: >
+                        If the pod belongs to a Deployment, this allows the
+                        controller to patch the Deployment spec for durable
+                        eviction.
+
+              victimPods:
+                type: array
+                description: >
+                  Pods experiencing crossfire degradation that should be
+                  protected.
+                minItems: 1
+                items:
+                  type: object
+                  required: [namespace, name]
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    deploymentName:
+                      type: string
+                      description: >
+                        If the pod belongs to a Deployment, this allows the
+                        controller to patch priority and topology constraints
+                        on the Deployment for durable effect.
+
+              strategy:
+                type: object
+                description: >
+                  The mitigation strategy. Specifies WHAT the desired
+                  protection level is. The controller determines the
+                  specific Kubernetes resources to create or modify.
+                required: [type]
+                properties:
+                  type:
+                    type: string
+                    description: >
+                      Mitigation strategy to apply.
+                      BandwidthConstraint: annotate decoy pods with CNI
+                        bandwidth limits (requires bandwidth-capable CNI).
+                      PriorityElevation: create PriorityClass for victim
+                        pods and patch their Deployments to use it.
+                      TopologyEviction: taint the congested node and spread
+                        victim pods, redirect decoy pods away.
+                      Hybrid: apply all three strategies in order.
+                    enum:
+                    - BandwidthConstraint
+                    - PriorityElevation
+                    - TopologyEviction
+                    - Hybrid
+
+                  decoyEgressLimitMbps:
+                    type: integer
+                    minimum: 1
+                    description: >
+                      [BandwidthConstraint, Hybrid] Maximum egress bandwidth
+                      in Mbps to allow from each decoy pod. Applied via the
+                      kubernetes.io/egress-bandwidth pod annotation.
+                      Default: 100
+
+                  decoyIngressLimitMbps:
+                    type: integer
+                    minimum: 1
+                    description: >
+                      [BandwidthConstraint, Hybrid] Maximum ingress bandwidth
+                      in Mbps for each decoy pod. Applied via the
+                      kubernetes.io/ingress-bandwidth pod annotation.
+                      Default: 100
+
+                  victimPriorityValue:
+                    type: integer
+                    minimum: 1
+                    maximum: 1000000000
+                    description: >
+                      [PriorityElevation, Hybrid] Numeric priority value for
+                      the PriorityClass created for victim pods.
+                      Default: 1000000 (elevated, below system-cluster-critical).
+
+                  victimPriorityClassName:
+                    type: string
+                    description: >
+                      [PriorityElevation, Hybrid] Name of the PriorityClass
+                      to create. Default: crossfire-victim-priority.
+
+                  originalVictimPriorityClassName:
+                    type: string
+                    description: >
+                      [PriorityElevation, Hybrid] The priority class name
+                      on the victim Deployment before patching, saved for
+                      revert. Set by the controller, not the intent generator.
+
+                  evictDecoysFromNode:
+                    type: boolean
+                    default: true
+                    description: >
+                      [TopologyEviction, Hybrid] If true, add anti-affinity
+                      to decoy Deployments to prevent their pods from being
+                      scheduled on the congested node after eviction.
+
+                  decoyMaxReplicas:
+                    type: integer
+                    minimum: 0
+                    description: >
+                      [Hybrid] Scale decoy Deployments down to this many
+                      replicas (default 0) and delete decoy DaemonSets.
+                      The controller discovers decoy pod owners via the
+                      Kubernetes ownerReferences API. Original replica
+                      counts are saved in appliedResources for revert.
+
+                  scaleUpVictimMinReplicas:
+                    type: integer
+                    minimum: 1
+                    description: >
+                      [TopologyEviction, Hybrid] If set, patch the victim
+                      Deployment's HPA minReplicas to this value, ensuring
+                      the victim service has sufficient replicas on
+                      uncongested nodes.
+
+                  victimScaleUpReplicas:
+                    type: integer
+                    minimum: 1
+                    description: >
+                      [Hybrid] Scale victim Deployments to this many replicas
+                      during mitigation for increased capacity. Original
+                      replica counts are saved for revert. Default: 3.
+
+              ttlSeconds:
+                type: integer
+                minimum: 30
+                maximum: 3600
+                description: >
+                  Time-to-live in seconds. The controller automatically
+                  reverts all applied resources after this duration,
+                  even if the detection event has not been explicitly resolved.
+                  This ensures mitigations do not persist indefinitely.
+                  Default: 300 (5 minutes).
+
+          status:
+            type: object
+            description: >
+              Controller-managed status. Records the current reconciliation
+              phase and all Kubernetes resources created or modified by
+              this intent (for accurate revert tracking).
+            properties:
+              phase:
+                type: string
+                description: >
+                  Current reconciliation phase.
+                  Pending:   Intent created, controller has not yet acted.
+                  Active:    Mitigation resources applied, continuously reconciled.
+                  Reverting: TTL expired or explicit deletion; reverting resources.
+                  Completed: All resources reverted. Terminal state.
+                  Failed:    Unrecoverable error. See conditions for details.
+                enum:
+                - Pending
+                - Active
+                - Reverting
+                - Completed
+                - Failed
+
+              appliedAt:
+                type: string
+                format: date-time
+                description: When the controller first transitioned to Active.
+
+              revertedAt:
+                type: string
+                format: date-time
+                description: When the controller completed the Reverting phase.
+
+              appliedResources:
+                type: array
+                description: >
+                  List of Kubernetes resources created or modified by this
+                  intent. Used by the controller for accurate revert.
+                  Owner references are also set on created resources.
+                items:
+                  type: object
+                  required: [kind, name]
+                  properties:
+                    apiVersion:
+                      type: string
+                    kind:
+                      type: string
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                    action:
+                      type: string
+                      enum: [Created, Patched, Annotated, Scaled, Deleted]
+                    revertData:
+                      type: object
+                      description: >
+                        Snapshot of fields before modification, used
+                        for accurate revert (e.g., original annotations,
+                        original priorityClassName).
+                      x-kubernetes-preserve-unknown-fields: true
+
+              conditions:
+                type: array
+                description: Standard Kubernetes conditions array.
+                items:
+                  type: object
+                  required: [type, status]
+                  properties:
+                    type:
+                      type: string
+                      description: >
+                        Condition types:
+                        Ready: mitigation is fully active.
+                        BandwidthConstraintApplied.
+                        BandwidthConstraintEffective: verified via metrics.
+                        BandwidthConstraintIneffective: CNI doesn't support it.
+                        PriorityElevationApplied.
+                        TopologyEvictionApplied.
+                        Reverted: revert completed.
+                        Degraded: partial application, some steps failed.
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+
+              message:
+                type: string
+                description: >
+                  Human-readable summary of the current controller status.
+                  Intended for operator display.

@@ -1,0 +1,11 @@
+---
+# Namespace where the KubeDDoS controller and its supporting resources live.
+# Application workloads remain in their own namespaces — the controller
+# reaches into them via ClusterRole bindings.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crossfire-system # kpt-set: ${system-namespace}
+  labels:
+    app.kubernetes.io/part-of: kubeddos
+    kubeddos.io/managed: "true"

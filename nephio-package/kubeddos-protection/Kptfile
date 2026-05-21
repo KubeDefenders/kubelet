@@ -1,0 +1,37 @@
+apiVersion: kpt.dev/v1
+kind: Kptfile
+metadata:
+  name: kubeddos-protection
+  annotations:
+    config.kubernetes.io/local-config: "true"
+info:
+  description: |
+    KubeDDoS per-application protection package.
+
+    This package creates a single DDoSProtection custom resource in your cluster.
+    The kubeddos-system controller watches for it and automatically reconciles:
+      - NetworkPolicies (decoy isolation, critical-path whitelisting)
+      - HorizontalPodAutoscalers (scaled to the chosen protection level)
+      - ResourceQuotas (namespace CPU/memory caps)
+
+    Prerequisites:
+      - kubeddos-system package already deployed in the cluster
+      - Target application running in a known namespace
+
+    Customise setters.yaml for your application, then apply:
+      kubectl apply -f . --recursive    # kubectl-only path
+      kpt live apply .                  # Nephio/kpt path
+  keywords:
+    - ddos
+    - crossfire
+    - mitigation
+    - nephio
+    - intent-based-networking
+pipeline:
+  mutators:
+    - image: gcr.io/kpt-fn/apply-setters:v0.2.0
+      configPath: setters.yaml
+  validators:
+    - image: gcr.io/kpt-fn/kubeval:v0.3.0
+      configMap:
+        ignore-missing-schemas: "true"

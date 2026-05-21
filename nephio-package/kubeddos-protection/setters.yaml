@@ -1,0 +1,26 @@
+apiVersion: fn.kpt.dev/v1alpha1
+kind: ApplySetters
+metadata:
+  name: setters
+  annotations:
+    config.kubernetes.io/local-config: "true"
+setters:
+  # ── Required ──────────────────────────────────────────────────────────────
+  # Kubernetes namespace of the application you want to protect.
+  target-namespace: sock-shop
+
+  # Unique name for this DDoSProtection resource (must be DNS-label-safe).
+  protection-name: sock-shop-ddos-protection
+
+  # ── Protection level ──────────────────────────────────────────────────────
+  # Controls HPA min/max replicas, CPU scale threshold, and ResourceQuota size.
+  #   low     : min=1, max=5,  scale at 90% CPU, 4 CPU  / 8 Gi  quota
+  #   medium  : min=2, max=10, scale at 80% CPU, 8 CPU  / 16 Gi quota
+  #   high    : min=3, max=20, scale at 70% CPU, 16 CPU / 32 Gi quota  ← default
+  #   maximum : min=5, max=30, scale at 60% CPU, 32 CPU / 64 Gi quota
+  protection-level: high
+
+  # ── SLO targets (informational — stored in CR, not yet enforced) ──────────
+  slo-availability: "99.9"
+  slo-max-latency-ms: "500"
+  slo-error-rate: "0.1"
